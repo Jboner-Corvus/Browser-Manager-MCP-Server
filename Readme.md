@@ -63,14 +63,13 @@ Le serveur browser-manager-mcp-server fournit les outils suivants :
 ## Installation
 
 0. **Téléchargement du projet** :
+
    ```powershell
-   # Clonez uniquement le dossier dist (nécessite git)
-   git clone --depth 1 --filter=blob:none --sparse https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server.git
-   cd Browser-Manager-MCP-Server
-   git sparse-checkout set dist
-   cd dist
+   # clonez le dépôt complet
+   git clone https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server.git
+   # Entrez dans le dossier dist
+   cd "Browser-Manager-MCP-Server-main\dist"
    ```
-   Ou téléchargez l'archive complète : `Invoke-WebRequest -Uri "https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/archive/refs/heads/main.zip" -OutFile "Browser-Manager-MCP-Server.zip"` puis extrayez et allez dans `Browser-Manager-MCP-Server-main\dist`.
 
 1. **Installation des dépendances** :
    ```bash
