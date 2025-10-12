@@ -11,12 +11,6 @@
     <img src="https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright">
     <img src="https://img.shields.io/badge/FastMCP-FF6B35?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastMCP">
   </p>
-
-  <p>
-    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server">📖 Documentation</a> •
-    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/issues">🐛 Signaler un bug</a> •
-    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/discussions">💬 Discussions</a>
-  </p>
 </div>
 
 ---
