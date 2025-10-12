@@ -10,7 +10,6 @@
     <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
     <img src="https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright">
     <img src="https://img.shields.io/badge/FastMCP-FF6B35?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastMCP">
-    <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
   </p>
 
   <p>
@@ -33,7 +32,6 @@ Browser Manager MCP Server est un serveur MCP (Model Context Protocol) spéciali
 - **📸 Capture d'écran** haute qualité
 - **⚡ Automatisation** des interactions web
 - **🔒 Authentification sécurisée** avec tokens Bearer
-- **🐳 Support Docker** complet
 - **📊 Monitoring** et logging avancés
 - **🔄 Architecture asynchrone** avec file d'attente Redis/BullMQ
 
@@ -43,7 +41,6 @@ Browser Manager MCP Server est un serveur MCP (Model Context Protocol) spéciali
 - **Playwright** : Automatisation navigateur cross-platform
 - **TypeScript** : Développement typé et robuste
 - **Node.js** : Runtime JavaScript performant
-- **Docker** : Conteneurisation et déploiement
 - **Redis/BullMQ** : File d'attente et tâches asynchrones
 
 ---
@@ -107,15 +104,6 @@ cp .env.example .env
 pnpm run build
 ```
 
-### Avec Docker
-
-```bash
-# Build et lancement avec Docker Compose
-docker compose up --build -d
-
-# Ou utiliser les scripts
-./scripts/run.sh clean && ./scripts/run.sh build
-```
 
 ---
 
@@ -177,7 +165,6 @@ Le serveur expose l'endpoint `/sse` sur le port 8081.
 - ✅ **TypeScript** : Code entièrement typé
 - ✅ **Tests** : Suite de tests complète
 - ✅ **Linting** : Code propre et standardisé
-- ✅ **Docker** : Déploiement containerisé
 - ✅ **CI/CD** : Intégration continue
 
 ---
