@@ -1,0 +1,1 @@
+import{expect as i,test as o}from"vitest";import{config as e}from"./config.js";o("config is defined",()=>{i(e).toBeDefined()});

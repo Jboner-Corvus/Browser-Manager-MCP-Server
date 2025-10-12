@@ -1,0 +1,1 @@
+import{expect as o,test as e,vi as i}from"vitest";import r from"./logger.js";i.mock("./config.js"),e("logger is defined",()=>{o(r).toBeDefined()});
