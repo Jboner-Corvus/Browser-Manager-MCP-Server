@@ -68,7 +68,7 @@ Le serveur browser-manager-mcp-server fournit les outils suivants :
    # clonez le dépôt complet
    git clone https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server.git
    # Entrez dans le dossier dist
-   cd "Browser-Manager-MCP-Server-main\dist"
+   cd "Browser-Manager-MCP-Server\dist"
    ```
 
 1. **Installation des dépendances** :
