@@ -141,11 +141,11 @@ export async function applicationEntryPoint() {
       transportType: 'httpStream',
       httpStream: {
         port: config.PORT,
-        endpoint: '/mcp',
+        endpoint: config.HTTP_STREAM_ENDPOINT as `/${string}`,
       },
     });
     logger.info(
-      `🚀 Serveur FastMCP démarré et à l'écoute sur http://localhost:${config.PORT}/mcp`
+      `🚀 Serveur FastMCP démarré et à l'écoute sur http://localhost:${config.PORT}${config.HTTP_STREAM_ENDPOINT}`
     );
   } catch (error) {
     logger.fatal({ err: getErrDetails(error) }, 'Échec critique lors du démarrage du serveur.');

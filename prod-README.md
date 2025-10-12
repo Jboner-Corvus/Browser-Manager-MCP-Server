@@ -147,6 +147,6 @@ Si vous voyez une page JSON avec des informations sur les onglets, le mode debug
 
 ### Endpoints API
 
-- **Serveur MCP** : `http://localhost:8081/mcp`
+- **Serveur MCP** : `http://localhost:8081/sse`
   - Protocole : HTTP Streaming
   - Authentification : Bearer Token (si configuré)
