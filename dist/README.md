@@ -121,12 +121,6 @@ start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote
 start "" "C:\Program Files\Chromium\Application\chromium.exe" --remote-debugging-port=9225 --user-data-dir="C:\temp\chromium-debug"
 ```
 
-#### Création de raccourcis bureau :
-
-1. Clic droit sur le bureau → Nouveau → Raccourci
-2. Coller la commande appropriée ci-dessus
-3. Nommer le raccourci (ex: "Chrome Debug Mode")
-4. Double-cliquer pour lancer en mode debug
 
 #### Vérification du mode Debug :
 
@@ -137,12 +131,6 @@ http://localhost:9222/json
 
 Si vous voyez une page JSON avec des informations sur les onglets, le mode debug est bien activé !
 
-#### Ports alternatifs :
-
-Si le port 9222 est déjà utilisé, vous pouvez utiliser :
-- `--remote-debugging-port=9223`
-- `--remote-debugging-port=9225`
-- etc.
 
 #### Notes importantes :
 
