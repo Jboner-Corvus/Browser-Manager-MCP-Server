@@ -1,22 +1,213 @@
-# Browser Manager MCP Server - Development
+# 🌐 Browser Manager MCP Server
 
 <div align="center">
-  <h1><font color="#2ECC71">Browser Manager MCP Server</font></h1>
-  <p><strong>Serveur MCP pour la gestion et l'automatisation des navigateurs web.</strong></p>
-  <p>Propulsé par Playwright, FastMCP et TypeScript.</p>
+  <h1>Browser Manager MCP Server</h1>
+  <p><strong>Serveur MCP (Model Context Protocol) spécialisé dans la gestion et l'automatisation des navigateurs web</strong></p>
+  <p>Une combinaison élégante des outils de Google et Microsoft, LIBRE de naviguer dans n'importe quel navigateur et sur n'importe quel onglet facilement.</p>
+
   <p>
-    <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="[Image du logo Node.js]">
-    <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="[Image du logo TypeScript]">
-    <img src="https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="[Image du logo Playwright]">
-    <img src="https://img.shields.io/badge/FastMCP-FF6B35?style=for-the-badge&logo=fastapi&logoColor=white" alt="[Image du logo FastMCP]">
+    <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js">
+    <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
+    <img src="https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright">
+    <img src="https://img.shields.io/badge/FastMCP-FF6B35?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastMCP">
+    <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+  </p>
+
+  <p>
+    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server">📖 Documentation</a> •
+    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/issues">🐛 Signaler un bug</a> •
+    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/discussions">💬 Discussions</a>
   </p>
 </div>
 
 ---
 
-## 🚀 <font color="#E74C3C">Mode Développement</font>
+## ✨ Description
 
-Ce fichier contient les instructions spécifiques pour le développement et le debugging du serveur MCP.
+Browser Manager MCP Server est un serveur MCP (Model Context Protocol) spécialisé dans la gestion et l'automatisation des navigateurs web. Il fournit une interface complète pour contrôler les navigateurs, gérer les onglets, interagir avec les pages web et effectuer des tâches d'automatisation.
+
+### 🚀 Fonctionnalités Clés
+
+- **🔍 Détection automatique** des navigateurs ouverts sur le système
+- **🎯 Contrôle précis** des onglets et fenêtres
+- **📸 Capture d'écran** haute qualité
+- **⚡ Automatisation** des interactions web
+- **🔒 Authentification sécurisée** avec tokens Bearer
+- **🐳 Support Docker** complet
+- **📊 Monitoring** et logging avancés
+- **🔄 Architecture asynchrone** avec file d'attente Redis/BullMQ
+
+### 🛠️ Technologies Utilisées
+
+- **FastMCP** : Framework MCP moderne
+- **Playwright** : Automatisation navigateur cross-platform
+- **TypeScript** : Développement typé et robuste
+- **Node.js** : Runtime JavaScript performant
+- **Docker** : Conteneurisation et déploiement
+- **Redis/BullMQ** : File d'attente et tâches asynchrones
+
+---
+
+## 🛠️ Outils Disponibles
+
+Le serveur browser-manager-mcp-server fournit les outils suivants :
+
+### Gestion des Navigateurs
+- `launch_browser` - Lance un nouveau navigateur
+- `list_browsers` - Liste les navigateurs gérés
+- `close_browser` - Ferme un navigateur
+- `detect_open_browsers` - Détecte les navigateurs ouverts sur le système
+
+### Gestion des Onglets
+- `list_tabs` - Liste les onglets ouverts
+- `select_tab` - Sélectionne un onglet
+- `new_tab` - Ouvre un nouvel onglet
+- `close_tab` - Ferme un onglet
+
+### Navigation et Interaction
+- `navigate` - Navigue vers une URL
+- `click` - Clique sur un élément
+- `type_text` - Tape du texte dans un champ
+- `wait_for` - Attend du texte ou un délai
+
+### Analyse et Capture
+- `get_html` - Récupère le HTML de la page
+- `get_console_logs` - Récupère les logs console
+- `screenshot` - Prend une capture d'écran
+- `evaluate_script` - Exécute du JavaScript
+
+### Outils Avancés
+- `list_external_browser_tabs` - Liste les onglets des navigateurs externes
+
+---
+
+## 📦 Installation
+
+### Prérequis
+
+- **Node.js** >= 24.0.2
+- **Docker** et Docker Compose (optionnel)
+- **Navigateurs** : Chrome, Firefox, Safari, Edge (pour les tests)
+
+### Installation Rapide
+
+```bash
+# Cloner le dépôt
+git clone https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server.git
+cd Browser-Manager-MCP-Server
+
+# Installer les dépendances
+pnpm install
+
+# Copier la configuration
+cp .env.example .env
+# Éditer .env avec vos paramètres
+
+# Build du projet
+pnpm run build
+```
+
+### Avec Docker
+
+```bash
+# Build et lancement avec Docker Compose
+docker compose up --build -d
+
+# Ou utiliser les scripts
+./scripts/run.sh clean && ./scripts/run.sh build
+```
+
+---
+
+## 🚀 Utilisation
+
+### Configuration
+
+Éditez le fichier `.env` :
+
+```env
+# Serveur
+HOST_PORT=8081
+PORT=8081
+HTTP_STREAM_ENDPOINT=/sse
+
+# Authentification
+AUTH_TOKEN=votre_token_sécurisé_ici
+REQUIRE_AUTH=false
+
+# Redis (optionnel pour les tâches async)
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=votre_mot_de_passe
+```
+
+### Lancement
+
+```bash
+# Mode développement
+pnpm run dev
+
+# Production
+pnpm start
+
+# Avec Docker
+docker compose up -d
+```
+
+### Connexion MCP
+
+Le serveur expose l'endpoint `/sse` sur le port 8081.
+
+**Configuration client MCP :**
+- Transport : HTTP Stream
+- URL : `http://localhost:8081/sse`
+- Authentification : Bearer Token (si activé)
+
+---
+
+## 🔗 Projets Similaires
+
+- [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) - Outils Chrome DevTools
+- [Playwright MCP](https://github.com/microsoft/playwright-mcp) - Automatisation Playwright
+
+---
+
+## 📊 Métriques
+
+- ✅ **TypeScript** : Code entièrement typé
+- ✅ **Tests** : Suite de tests complète
+- ✅ **Linting** : Code propre et standardisé
+- ✅ **Docker** : Déploiement containerisé
+- ✅ **CI/CD** : Intégration continue
+
+---
+
+## 🤝 Contribution
+
+Les contributions sont les bienvenues ! Voir le guide de contribution pour plus de détails.
+
+1. Fork le projet
+2. Créez une branche (`git checkout -b feature/AmazingFeature`)
+3. Committez (`git commit -m 'Add some AmazingFeature'`)
+4. Push (`git push origin feature/AmazingFeature`)
+5. Ouvrez une Pull Request
+
+---
+
+## 📄 Licence
+
+Ce projet est sous licence ISC.
+
+---
+
+<div align="center">
+  <p><strong>Fait avec ❤️ pour la communauté MCP</strong></p>
+  <p>
+    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/stargazers">⭐ Stars</a> •
+    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/network/members">🍴 Forks</a> •
+    <a href="https://github.com/Jboner-Corvus/Browser-Manager-MCP-Server/issues">🐛 Issues</a>
+  </p>
+</div>
 
 ## 🔧 <font color="#3498DB">Installation des dépendances</font>
 
