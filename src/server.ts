@@ -137,15 +137,17 @@ export async function applicationEntryPoint() {
     logger.warn({ reason: event.reason || 'Non spécifiée' }, 'Session client déconnectée.');
   });
   try {
+    // FORCER HTTP Stream comme mode par défaut absolu
+    // Mode HTTP Stream (défaut) - supporte SSE et stdio
     await server.start({
       transportType: 'httpStream',
       httpStream: {
         port: config.PORT,
-        endpoint: config.HTTP_STREAM_ENDPOINT as `/${string}`,
+        endpoint: '/mcp',
       },
     });
     logger.info(
-      `🚀 Serveur FastMCP démarré et à l'écoute sur http://localhost:${config.PORT}${config.HTTP_STREAM_ENDPOINT}`
+      `🚀 Serveur FastMCP démarré en mode HTTP Stream par défaut sur http://localhost:${config.PORT}/mcp (SSE: /sse)`
     );
   } catch (error) {
     logger.fatal({ err: getErrDetails(error) }, 'Échec critique lors du démarrage du serveur.');

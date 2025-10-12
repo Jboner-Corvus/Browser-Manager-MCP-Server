@@ -47,7 +47,7 @@
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "dotenv": "^17.1.0",
-    "fastmcp": "3.8.2",
+    "fastmcp": "3.19.1",
     "pino": "^9.7.0",
     "playwright": "^1.56.0",
     "zod": "^3.25.75"

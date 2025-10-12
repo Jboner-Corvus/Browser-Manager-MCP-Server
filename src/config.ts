@@ -20,7 +20,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(8081),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-  HTTP_STREAM_ENDPOINT: z.string().startsWith('/').default('/stream'),
+  HTTP_STREAM_ENDPOINT: z.string().startsWith('/').default('/mcp'),
   AUTH_TOKEN: z.string().min(16, 'AUTH_TOKEN doit comporter au moins 16 caractères.'),
   REQUIRE_AUTH: z.coerce.boolean().default(false),
   HEALTH_CHECK_PATH: z

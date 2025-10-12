@@ -35,41 +35,47 @@ export const launchBrowserTool = {
       .default(true)
       .describe('Exécuter le navigateur en mode headless'),
     browser: z
-      .enum(['chromium', 'firefox', 'webkit'])
+      .enum(['chromium', 'firefox', 'webkit', 'brave'])
       .optional()
-      .default('chromium')
+      .default('brave')
       .describe('Type de navigateur'),
   }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   execute: async (args: any, _context: Context<AuthData>) => {
     try {
       const { headless, browser: browserType } = args;
-      
+
       // Configuration du débogage distant pour tous les navigateurs
-      const launchOptions: any = { 
+      const launchOptions: any = {
         headless,
         args: [
           '--remote-debugging-port=9222',
           '--disable-web-security',
-          '--disable-features=VizDisplayCompositor'
-        ]
+          '--disable-features=VizDisplayCompositor',
+        ],
       };
-      
-      // Configuration spécifique pour Chromium/Chrome
-      if (browserType === 'chromium') {
+
+      // Configuration spécifique pour Chromium/Chrome/Brave
+      if (browserType === 'chromium' || browserType === 'brave') {
         launchOptions.args.push(
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
-          '--no-zygote',
-          '--single-process'
+          '--disable-gpu',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding'
         );
       }
-      
+
       const browser = await (
-        browserType === 'chromium' ? chromium : browserType === 'firefox' ? firefox : webkit
+        browserType === 'chromium' || browserType === 'brave'
+          ? chromium
+          : browserType === 'firefox'
+            ? firefox
+            : webkit
       ).launch(launchOptions);
       const context = await browser.newContext();
       const page = await context.newPage();
@@ -110,7 +116,11 @@ export const listBrowsersTool = {
   description: 'Liste tous les navigateurs (gérés et externes) avec leurs onglets',
   parameters: z.object({}),
   execute: async (_args: any, _context: Context<AuthData>) => {
-    const managedBrowsers = Array.from(browsers.keys()).map((id) => ({ id, type: 'managed', tabs: [] }));
+    const managedBrowsers = Array.from(browsers.keys()).map((id) => ({
+      id,
+      type: 'managed',
+      tabs: [],
+    }));
 
     // Detect external browsers
     const externalBrowsers = [];
@@ -441,18 +451,92 @@ export const clickTool = {
   parameters: z.object({
     selector: z.string().describe("Sélecteur CSS ou description de l'élément"),
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
+    force: z.boolean().optional().default(false).describe('Forcer le clic même si l élément est caché ou bloqué'),
+    timeout: z.number().optional().default(30000).describe('Timeout en millisecondes'),
+    waitForSelector: z.boolean().optional().default(true).describe('Attendre que le sélecteur soit disponible'),
   }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { selector, pageId = currentPageId } = args;
+    const { selector, pageId = currentPageId, force, timeout, waitForSelector } = args;
     if (!pageId || !pages.has(pageId)) {
       throw new Error('Aucune page active');
     }
     const page = pages.get(pageId)!;
-    await page.click(selector);
-    return 'Cliqué';
+    
+    try {
+      // Attendre que l'élément soit disponible si demandé
+      if (waitForSelector) {
+        await page.waitForSelector(selector, { timeout });
+      }
+      
+      // Essayer de cliquer normalement d'abord
+      try {
+        await page.click(selector, { timeout, force });
+        return 'Cliqué avec succès';
+      } catch (clickError: any) {
+        // Si le clic normal échoue, essayer de forcer le clic
+        if (!force && clickError.message.includes('intercepts pointer events')) {
+          // Détecter et fermer les overlays bloquants
+          await removeBlockingOverlays(page);
+          
+          // Réessayer le clic
+          await page.click(selector, { timeout: 5000, force: true });
+          return 'Cliqué avec succès (après suppression des overlays)';
+        }
+        throw clickError;
+      }
+    } catch (error: any) {
+      // En dernier recours, utiliser JavaScript pour forcer le clic
+      try {
+        await page.evaluate((sel) => {
+          const element = document.querySelector(sel);
+          if (element) {
+            (element as HTMLElement).click();
+          } else {
+            throw new Error(`Élément non trouvé: ${sel}`);
+          }
+        }, selector);
+        return 'Cliqué avec succès (via JavaScript)';
+      } catch (jsError: any) {
+        throw new Error(`Échec du clic: ${error.message}. Tentative JavaScript échouée: ${jsError.message}`);
+      }
+    }
   },
 };
+
+// Fonction utilitaire pour supprimer les overlays bloquants
+async function removeBlockingOverlays(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    // Supprimer les overlays de tutoriel
+    const tutorialOverlays = document.querySelectorAll('[class*="tutorial"], [class*="overlay"], [ng-if*="tutorial"]');
+    tutorialOverlays.forEach((overlay: any) => {
+      if (overlay.style) {
+        overlay.style.display = 'none';
+        overlay.style.visibility = 'hidden';
+        overlay.style.pointerEvents = 'none';
+      }
+    });
+    
+    // Supprimer les modales et popups
+    const modals = document.querySelectorAll('[class*="modal"], [class*="popup"], [class*="dialog"]');
+    modals.forEach((modal: any) => {
+      if (modal.style && (modal.style.display !== 'none' || modal.style.visibility !== 'hidden')) {
+        modal.style.display = 'none';
+        modal.style.visibility = 'hidden';
+        modal.style.pointerEvents = 'none';
+      }
+    });
+    
+    // Supprimer les éléments avec position fixed qui pourraient bloquer
+    const fixedElements = document.querySelectorAll('*');
+    fixedElements.forEach((el: any) => {
+      const style = window.getComputedStyle(el);
+      if (style.position === 'fixed' && style.zIndex && parseInt(style.zIndex) > 1000) {
+        el.style.pointerEvents = 'none';
+      }
+    });
+  });
+}
 
 // Tool: type_text
 export const typeTextTool = {
@@ -462,41 +546,353 @@ export const typeTextTool = {
     selector: z.string().describe('Sélecteur CSS'),
     text: z.string().describe('Texte à taper'),
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
+    timeout: z.number().optional().default(30000).describe('Timeout en millisecondes'),
+    clearFirst: z.boolean().optional().default(true).describe('Effacer le contenu avant de taper'),
+    force: z.boolean().optional().default(false).describe('Forcer la saisie même si l élément est caché'),
+    waitForSelector: z.boolean().optional().default(true).describe('Attendre que le sélecteur soit disponible'),
   }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { selector, text, pageId = currentPageId } = args;
+    const { selector, text, pageId = currentPageId, timeout, clearFirst, force, waitForSelector } = args;
     if (!pageId || !pages.has(pageId)) {
       throw new Error('Aucune page active');
     }
     const page = pages.get(pageId)!;
-    await page.fill(selector, text);
-    return 'Texte tapé';
+    
+    try {
+      // Stratégie améliorée pour trouver les éléments de saisie
+      let targetElement = null;
+      let foundStrategy = '';
+      
+      // Attendre l'élément avec un timeout plus court si demandé
+      if (waitForSelector) {
+        try {
+          await page.waitForSelector(selector, { timeout: Math.min(timeout, 5000) });
+          targetElement = await page.$(selector);
+          foundStrategy = 'standard';
+        } catch (waitError: any) {
+          // Si l'attente échoue, essayer des stratégies alternatives
+          foundStrategy = 'fallback';
+        }
+      }
+      
+      // Si pas trouvé, essayer des stratégies de repli
+      if (!targetElement) {
+        // Stratégie 1: Chercher les éléments ACE Editor spécifiques
+        const aceSelectors = [
+          selector,
+          '.ace_editor',
+          '.ace_text-input',
+          '.ace_content',
+          'textarea',
+          'input[type="text"]',
+          '[contenteditable="true"]'
+        ];
+        
+        for (const sel of aceSelectors) {
+          try {
+            const elements = await page.$$(sel);
+            if (elements.length > 0) {
+              targetElement = elements[0]; // Prendre le premier trouvé
+              foundStrategy = `ace-editor (${sel})`;
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+        
+        // Stratégie 2: Recherche par attributs communs pour les éditeurs
+        if (!targetElement) {
+          const found = await page.evaluate(() => {
+            const candidates = [
+              // ACE Editor
+              document.querySelector('.ace_editor'),
+              document.querySelector('.ace_text-input'),
+              // CodeMirror
+              document.querySelector('.CodeMirror'),
+              // Monaco Editor
+              document.querySelector('.monaco-editor'),
+              // Éditeurs génériques
+              document.querySelector('[role="textbox"]'),
+              document.querySelector('[role="combobox"]'),
+              document.querySelector('[contenteditable="true"]'),
+              // Input/textarea standards
+              document.querySelector('textarea'),
+              document.querySelector('input[type="text"]'),
+            ];
+            
+            for (const candidate of candidates) {
+              if (candidate && 
+                  ((candidate as HTMLElement).offsetWidth > 0 || (candidate as HTMLElement).offsetHeight > 0 || 
+                   window.getComputedStyle(candidate).display !== 'none')) {
+                return candidate;
+              }
+            }
+            return null;
+          });
+          
+          if (found) {
+            targetElement = found;
+            foundStrategy = 'attribute-search';
+          }
+        }
+        
+        // Stratégie 3: Recherche par XPath pour les éléments complexes
+        if (!targetElement) {
+          try {
+            const xpathFound = await page.$(`//*[contains(@class, 'ace') or contains(@class, 'editor') or contains(@class, 'input') or @contenteditable][not(@disabled)]`);
+            if (xpathFound) {
+              targetElement = xpathFound;
+              foundStrategy = 'xpath-search';
+            }
+          } catch {
+            // Ignorer les erreurs XPath
+          }
+        }
+        
+        // Stratégie 4: Forcer la recherche sans visibilité
+        if (!targetElement && force) {
+          try {
+            const forcedFound = await page.$$(selector);
+            if (forcedFound.length > 0) {
+              targetElement = forcedFound[0];
+              foundStrategy = 'forced';
+            }
+          } catch {
+            // Ignorer les erreurs
+          }
+        }
+        
+        if (!targetElement) {
+          throw new Error(`Élément non trouvé pour le sélecteur "${selector}" après plusieurs stratégies de recherche`);
+        }
+      }
+      
+      // Maintenant essayer de taper le texte avec différentes méthodes
+      try {
+        // Méthode 1: Utiliser fill si possible (pour les éléments qui supportent)
+        if (targetElement) {
+          try {
+            const elementType = await targetElement.getAttribute('type');
+            if (elementType !== 'file') {
+              await (targetElement as any).fill(text, { timeout: 10000 });
+              return 'Texte tapé avec succès (fill)';
+            }
+          } catch (fillError: any) {
+            // Si fill échoue, essayer type
+          }
+        }
+        
+        // Méthode 2: Utiliser type
+        let typeError: any = null;
+        try {
+          await (targetElement as any).type(text, { timeout: 10000 });
+          return 'Texte tapé avec succès (type)';
+        } catch (error: any) {
+          typeError = error;
+          // Si type échoue, essayer des approches alternatives
+        }
+        
+        // Méthode 3: Rendre l'élément visible et forcer la saisie
+        if (!force && typeError && typeError.message && (typeError.message.includes('not visible') || typeError.message.includes('hidden'))) {
+          await page.evaluate((element: any) => {
+            const el = element as HTMLElement;
+            if (el) {
+              const originalStyle = el.style.cssText;
+              el.style.cssText = 'visibility: visible !important; display: block !important; opacity: 1 !important; z-index: 9999 !important;';
+              el.setAttribute('data-original-style', originalStyle);
+              
+              // Forcer le focus
+              el.focus();
+              
+              // Rendre le contenu éditable si nécessaire
+              if (el.getAttribute('contenteditable') === 'false') {
+                el.setAttribute('contenteditable', 'true');
+                el.setAttribute('data-original-contenteditable', 'false');
+              }
+            }
+          }, targetElement as any);
+          
+          // Réessayer la saisie
+          try {
+            await (targetElement as any).fill(text, { timeout: 5000 });
+            return 'Texte tapé avec succès (après modification du style)';
+          } catch {
+            await (targetElement as any).type(text, { timeout: 5000 });
+            return 'Texte tapé avec succès (après modification du style)';
+          }
+        }
+        
+        // Méthode 4: Utiliser JavaScript direct pour les cas difficiles
+        await page.evaluate(([element, txt, clear]) => {
+          const el = element as any;
+          
+          // Gérer différents types d'éléments
+          if (el) {
+            // Pour ACE Editor
+            if (el.classList && el.classList.contains('ace_editor')) {
+              const ace = (window as any).ace;
+              if (ace && ace.edit(el)) {
+                const editor = ace.edit(el);
+                if (clear) {
+                  editor.setValue('');
+                }
+                editor.insert(txt);
+                editor.focus();
+                return true;
+              }
+            }
+            
+            // Pour les éléments contenteditable
+            if (el.contentEditable === 'true' || el.getAttribute('contenteditable') === 'true') {
+              if (clear) {
+                el.innerText = '';
+              }
+              el.innerText = txt;
+              el.focus();
+              // Déclencher les événements appropriés
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            }
+            
+            // Pour les inputs/textarea standards
+            if (el.value !== undefined) {
+              if (clear) {
+                el.value = '';
+              }
+              el.value = txt;
+              el.focus();
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            }
+            
+            // Pour les autres éléments, essayer de définir innerText
+            if (el.innerText !== undefined) {
+              if (clear) {
+                el.innerText = '';
+              }
+              el.innerText = txt;
+              el.focus();
+              return true;
+            }
+            
+            throw new Error('Type d\'élément non supporté pour la saisie');
+          } else {
+            throw new Error('Élément non disponible');
+          }
+        }, [targetElement, text, clearFirst]);
+        
+        // Restaurer le style original si modifié
+        await page.evaluate((element: any) => {
+          const el = element as HTMLElement;
+          if (el) {
+            const originalStyle = el.getAttribute('data-original-style');
+            if (originalStyle) {
+              el.style.cssText = originalStyle;
+              el.removeAttribute('data-original-style');
+            }
+            
+            const originalContentEditable = el.getAttribute('data-original-contenteditable');
+            if (originalContentEditable) {
+              el.setAttribute('contenteditable', originalContentEditable);
+              el.removeAttribute('data-original-contenteditable');
+            }
+          }
+        }, targetElement as any);
+        
+        return `Texte tapé avec succès (${foundStrategy} + JavaScript direct)`;
+      } catch (error: any) {
+        throw new Error(`Échec de la saisie de texte: ${error.message} (stratégie: ${foundStrategy})`);
+      }
+    } catch (error: any) {
+      throw new Error(`Échec de la saisie de texte: ${error.message}`);
+    }
   },
 };
 
 // Tool: wait_for
 export const waitForTool = {
   name: 'wait_for',
-  description: 'Attend du texte ou un délai',
+  description: 'Attend du texte, un sélecteur ou un délai',
   parameters: z.object({
     text: z.string().optional().describe('Texte à attendre'),
+    selector: z.string().optional().describe('Sélecteur CSS à attendre'),
     time: z.number().optional().describe("Temps d'attente en secondes"),
+    timeout: z.number().optional().default(30000).describe('Timeout en millisecondes'),
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
+    hidden: z.boolean().optional().default(false).describe('Attendre même les éléments cachés'),
   }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { text, time, pageId = currentPageId } = args;
+    const { text, selector, time, timeout, pageId = currentPageId, hidden } = args;
     if (!pageId || !pages.has(pageId)) {
       throw new Error('Aucune page active');
     }
     const page = pages.get(pageId)!;
-    if (text) {
-      await page.waitForSelector(`text=${text}`);
-    } else if (time) {
-      await page.waitForTimeout(time * 1000);
+    
+    try {
+      if (text) {
+        // Attendre du texte avec plusieurs stratégies
+        try {
+          await page.waitForSelector(`text=${text}`, { timeout, state: hidden ? 'attached' : 'visible' });
+          return `Texte "${text}" trouvé avec succès`;
+        } catch (textError: any) {
+          // Stratégie de repli : chercher dans tout le document
+          const found = await page.evaluate(([searchText, isHidden]) => {
+            const elements = document.querySelectorAll('*');
+            for (const el of elements) {
+              if (el.textContent && el.textContent.includes(searchText)) {
+                const style = window.getComputedStyle(el);
+                if (isHidden || style.display !== 'none' && style.visibility !== 'hidden') {
+                  return true;
+                }
+              }
+            }
+            return false;
+          }, [text, hidden]);
+          
+          if (found) {
+            return `Texte "${text}" trouvé (via recherche étendue)`;
+          }
+          throw new Error(`Texte "${text}" non trouvé après ${timeout}ms`);
+        }
+      } else if (selector) {
+        // Attendre un sélecteur CSS
+        try {
+          await page.waitForSelector(selector, { timeout, state: hidden ? 'attached' : 'visible' });
+          return `Sélecteur "${selector}" trouvé avec succès`;
+        } catch (selectorError: any) {
+          // Stratégie de repli : chercher avec des critères plus larges
+          const found = await page.evaluate(([sel, isHidden]) => {
+            try {
+              const element = document.querySelector(sel);
+              if (element) {
+                const style = window.getComputedStyle(element);
+                return isHidden || (style.display !== 'none' && style.visibility !== 'hidden');
+              }
+              return false;
+            } catch {
+              return false;
+            }
+          }, [selector, hidden]);
+          
+          if (found) {
+            return `Sélecteur "${selector}" trouvé (via vérification directe)`;
+          }
+          throw new Error(`Sélecteur "${selector}" non trouvé après ${timeout}ms`);
+        }
+      } else if (time) {
+        await page.waitForTimeout(time * 1000);
+        return `Attente de ${time} secondes terminée`;
+      } else {
+        throw new Error('Veuillez spécifier soit "text", soit "selector", soit "time"');
+      }
+    } catch (error: any) {
+      throw new Error(`Erreur lors de l'attente: ${error.message}`);
     }
-    return 'Attente terminée';
   },
 };
 
@@ -506,16 +902,57 @@ export const getHtmlTool = {
   description: 'Récupère le HTML de la page',
   parameters: z.object({
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
+    selector: z.string().optional().describe('Sélecteur CSS pour obtenir le HTML d\'un élément spécifique'),
+    maxChars: z.number().optional().default(5000).describe('Nombre maximum de caractères à retourner'),
+    truncate: z.boolean().optional().default(true).describe('Tronquer le HTML si trop volumineux'),
   }),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { pageId = currentPageId } = args;
+    const { pageId = currentPageId, selector, maxChars, truncate } = args;
     if (!pageId || !pages.has(pageId)) {
       throw new Error('Aucune page active');
     }
     const page = pages.get(pageId)!;
-    const html = await page.content();
-    return html;
+    
+    try {
+      let html: string;
+      
+      if (selector) {
+        // Obtenir le HTML d'un élément spécifique
+        const element = await page.$(selector);
+        if (!element) {
+          throw new Error(`Élément non trouvé pour le sélecteur: ${selector}`);
+        }
+        html = await element.innerHTML();
+      } else {
+        // Obtenir le HTML complet de la page
+        html = await page.content();
+      }
+      
+      // Limiter la taille de la réponse si nécessaire
+      if (html.length > maxChars && truncate) {
+        const truncatedHtml = html.substring(0, maxChars) + '...\n\n[HTML tronqué - utilisez les paramètres maxChars ou truncate: false pour voir plus]';
+        return JSON.stringify({
+          html: truncatedHtml,
+          totalLength: html.length,
+          truncated: true,
+          selector: selector || null,
+          message: `HTML tronqué à ${maxChars} caractères sur ${html.length} caractères au total`
+        }, null, 2);
+      }
+      
+      // Retourner le HTML sous forme de chaîne avec métadonnées
+      const result = {
+        html: html,
+        totalLength: html.length,
+        truncated: false,
+        selector: selector || null,
+      };
+      
+      return JSON.stringify(result, null, 2);
+    } catch (error: any) {
+      throw new Error(`Erreur lors de la récupération du HTML: ${error.message}`);
+    }
   },
 };
 
@@ -525,14 +962,59 @@ export const getConsoleLogsTool = {
   description: 'Récupère les logs de la console développeur',
   parameters: z.object({
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
+    maxLogs: z.number().optional().default(100).describe('Nombre maximum de logs à retourner'),
+    level: z.enum(['log', 'info', 'warn', 'error', 'debug']).optional().describe('Filtrer par niveau de log'),
+    since: z.number().optional().describe('Filtrer les logs depuis ce timestamp (en ms)'),
+    search: z.string().optional().describe('Rechercher du texte dans les logs'),
+    truncate: z.boolean().optional().default(true).describe('Tronquer les logs si trop volumineux'),
   }),
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { pageId = currentPageId } = args;
+    const { pageId = currentPageId, maxLogs, level, since, search, truncate } = args;
     if (!pageId || !consoleLogs.has(pageId)) {
       throw new Error('Aucune page active ou pas de logs');
     }
     const logs = consoleLogs.get(pageId)!;
-    return JSON.stringify(logs, null, 2);
+    
+    // Filtrer les logs selon les critères
+    let filteredLogs = logs;
+    
+    // Filtrer par niveau
+    if (level) {
+      filteredLogs = filteredLogs.filter(log => log.type === level);
+    }
+    
+    // Filtrer par timestamp
+    if (since) {
+      filteredLogs = filteredLogs.filter(log => log.timestamp >= since);
+    }
+    
+    // Filtrer par recherche de texte
+    if (search) {
+      const searchTerm = search.toLowerCase();
+      filteredLogs = filteredLogs.filter(log => log.text.toLowerCase().includes(searchTerm));
+    }
+    
+    // Limiter le nombre de logs
+    if (filteredLogs.length > maxLogs) {
+      filteredLogs = filteredLogs.slice(-maxLogs); // Prendre les logs les plus récents
+    }
+    
+    // Préparer la réponse
+    const result = {
+      logs: filteredLogs,
+      totalCount: logs.length,
+      filteredCount: filteredLogs.length,
+      truncated: filteredLogs.length < logs.length,
+      filters: {
+        level,
+        since,
+        search,
+        maxLogs
+      }
+    };
+    
+    // Retourner sous forme de chaîne JSON
+    return JSON.stringify(result, null, 2);
   },
 };
 
@@ -543,18 +1025,60 @@ export const evaluateScriptTool = {
   parameters: z.object({
     script: z.string().describe('Code JavaScript à exécuter'),
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
+    safeMode: z.boolean().optional().default(true).describe('Mode sécurisé pour éviter les erreurs fatales'),
   }),
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { script, pageId = currentPageId } = args;
+    const { script, pageId = currentPageId, safeMode } = args;
     if (!pageId || !pages.has(pageId)) {
       throw new Error('Aucune page active');
     }
     const page = pages.get(pageId)!;
+    
     try {
-      const result = await page.evaluate(script);
+      let result;
+      
+      if (safeMode) {
+        // Mode sécurisé : wrapper le script pour gérer les erreurs
+        const safeScript = `
+          (function() {
+            try {
+              ${script}
+            } catch (error) {
+              return {
+                error: true,
+                message: error.message,
+                name: error.name,
+                stack: error.stack
+              };
+            }
+          })()
+        `;
+        
+        result = await page.evaluate(safeScript);
+        
+        // Vérifier si le script a retourné une erreur
+        if (result && typeof result === 'object' && (result as any).error) {
+          const errorResult = result as any;
+          return `Erreur d'exécution: ${errorResult.message}\nDétails: ${errorResult.name}\nStack: ${errorResult.stack || 'Non disponible'}`;
+        }
+      } else {
+        // Mode direct : exécuter le script sans wrapper
+        result = await page.evaluate(script);
+      }
+      
       return `Résultat: ${JSON.stringify(result, null, 2)}`;
-    } catch (error) {
-      throw new Error(`Erreur d'exécution du script: ${(error as Error).message}`);
+    } catch (error: any) {
+      // Gérer les erreurs d'exécution Playwright
+      if (error.message.includes('ReferenceError') && error.message.includes('is not defined')) {
+        const varName = error.message.match(/ReferenceError: (\w+) is not defined/);
+        const suggestion = varName 
+          ? `\nSuggestion: Assurez-vous que la variable '${varName[1]}' est définie dans le contexte de la page.\nTry: window.${varName[1]} ou document.querySelector('#${varName[1]}')`
+          : '\nSuggestion: Vérifiez que toutes les variables globales sont accessibles.';
+        
+        return `Erreur d'exécution du script: ${error.message}${suggestion}`;
+      } else {
+        return `Erreur d'exécution du script: ${error.message}`;
+      }
     }
   },
 };

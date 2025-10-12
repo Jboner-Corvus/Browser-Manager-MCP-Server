@@ -149,6 +149,31 @@ Si vous voyez une page JSON avec des informations sur les onglets, le mode debug
 
 ### Endpoints API
 
-- **Serveur MCP** : `http://localhost:8081/sse`
-  - Protocole : HTTP Streaming
+Le serveur MCP fonctionne avec FastMCP 3.19.1 et propose deux endpoints principaux :
+
+- **Endpoint MCP principal** : `http://localhost:8081/mcp`
+  - Protocole : HTTP Stream (JSON-RPC)
+  - Usage : Communication directe avec le protocole MCP
   - Authentification : Bearer Token (si configuré)
+
+- **Endpoint SSE** : `http://localhost:8081/sse`
+  - Protocole : Server-Sent Events (Streaming)
+  - Usage : Connexions en temps réel et streaming
+  - Authentification : Bearer Token (si configuré)
+
+### Modes de Transport
+
+Le serveur supporte trois modes de transport :
+
+1. **HTTP Stream (par défaut)** : `node lib/server.js`
+   - Endpoint principal : `/mcp`
+   - Endpoint SSE : `/sse`
+   - Idéal pour les applications web et APIs
+
+2. **Mode stdio** : `MCP_TRANSPORT=stdio node lib/server.js`
+   - Usage : Intégration avec les clients MCP (Qoder, Claude Desktop, etc.)
+   - Communication via entrée/sortie standard
+
+3. **Mode SSE** : `MCP_TRANSPORT=sse node lib/server.js`
+   - Endpoint : `/mcp` (redirige vers le streaming SSE)
+   - Usage : Applications nécessitant du streaming pur
