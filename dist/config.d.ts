@@ -1,0 +1,53 @@
+import { z } from 'zod';
+declare const envSchema: z.ZodObject<{
+    NODE_ENV: z.ZodDefault<z.ZodEnum<["development", "production", "test"]>>;
+    PORT: z.ZodDefault<z.ZodNumber>;
+    LOG_LEVEL: z.ZodDefault<z.ZodEnum<["fatal", "error", "warn", "info", "debug", "trace"]>>;
+    HTTP_STREAM_ENDPOINT: z.ZodDefault<z.ZodString>;
+    AUTH_TOKEN: z.ZodString;
+    REQUIRE_AUTH: z.ZodDefault<z.ZodBoolean>;
+    REDIS_HOST: z.ZodDefault<z.ZodString>;
+    REDIS_PORT: z.ZodDefault<z.ZodNumber>;
+    REDIS_PASSWORD: z.ZodOptional<z.ZodString>;
+    HEALTH_CHECK_PATH: z.ZodDefault<z.ZodString>;
+    WEBHOOK_SECRET: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    WEBHOOK_SECRET: string;
+    NODE_ENV: "test" | "development" | "production";
+    PORT: number;
+    LOG_LEVEL: "debug" | "fatal" | "error" | "warn" | "info" | "trace";
+    HTTP_STREAM_ENDPOINT: string;
+    AUTH_TOKEN: string;
+    REQUIRE_AUTH: boolean;
+    REDIS_HOST: string;
+    REDIS_PORT: number;
+    HEALTH_CHECK_PATH: string;
+    REDIS_PASSWORD?: string | undefined;
+}, {
+    WEBHOOK_SECRET: string;
+    AUTH_TOKEN: string;
+    NODE_ENV?: "test" | "development" | "production" | undefined;
+    PORT?: number | undefined;
+    LOG_LEVEL?: "debug" | "fatal" | "error" | "warn" | "info" | "trace" | undefined;
+    HTTP_STREAM_ENDPOINT?: string | undefined;
+    REQUIRE_AUTH?: boolean | undefined;
+    REDIS_HOST?: string | undefined;
+    REDIS_PORT?: number | undefined;
+    REDIS_PASSWORD?: string | undefined;
+    HEALTH_CHECK_PATH?: string | undefined;
+}>;
+export type Config = z.infer<typeof envSchema>;
+export declare const config: {
+    WEBHOOK_SECRET: string;
+    NODE_ENV: "test" | "development" | "production";
+    PORT: number;
+    LOG_LEVEL: "debug" | "fatal" | "error" | "warn" | "info" | "trace";
+    HTTP_STREAM_ENDPOINT: string;
+    AUTH_TOKEN: string;
+    REQUIRE_AUTH: boolean;
+    REDIS_HOST: string;
+    REDIS_PORT: number;
+    HEALTH_CHECK_PATH: string;
+    REDIS_PASSWORD?: string | undefined;
+};
+export {};

@@ -1,0 +1,158 @@
+// src/worker.ts
+import { initQueues } from './queue.js';
+// Fonction de traitement simulée
+async function doWorkSpecific(params, auth, taskId) {
+    const startTime = new Date();
+    await new Promise((res) => setTimeout(res, params.durationMs));
+    if (params.failTask) {
+        throw new Error(`Échec simulé pour la tâche ${taskId}.`);
+    }
+    const result = params.value1 + params.value2;
+    const endTime = new Date();
+    const durationTakenMs = endTime.getTime() - startTime.getTime();
+    return {
+        calcRes: result,
+        details: `Le résultat de ${params.value1} + ${params.value2} est calculé.`,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        durationTakenMs,
+        inputUserId: params.userId,
+    };
+}
+import { TASK_QUEUE_NAME, DEAD_LETTER_QUEUE_NAME } from './utils/constants.js';
+import { getErrDetails } from './utils/errorUtils.js';
+import { sendWebhook } from './utils/webhookUtils.js';
+const Q_NAME = TASK_QUEUE_NAME;
+const processors = {
+    // Kept JobProcFn as JobProcFn<any,any> implicitly
+    asynchronousTaskSimulatorEnhanced: doWorkSpecific,
+};
+export async function initWorker(logger, config) {
+    const { Worker } = await import('bullmq');
+    const workerLog = logger.child({ proc: 'worker', queue: Q_NAME });
+    const { taskQueue, deadLetterQueue, redisConnection } = initQueues();
+    const worker = new Worker(Q_NAME, async (job) => {
+        const { toolName, params, auth, taskId, cbUrl } = job.data;
+        const jobLog = workerLog.child({
+            jobId: job.id,
+            taskId,
+            tool: toolName,
+            attempt: job.attemptsMade,
+        });
+        jobLog.info({ paramsPreview: JSON.stringify(params)?.substring(0, 100) }, `Traitement du job`);
+        const processor = processors[toolName];
+        if (!processor) {
+            jobLog.error(`Aucun processeur pour l'outil : ${toolName}. La tâche sera marquée comme échouée.`);
+            throw new Error(`Aucun processeur trouvé pour l'outil : ${toolName}`);
+        }
+        let outcome;
+        try {
+            if (cbUrl) {
+                const initialProgressOutcome = {
+                    taskId,
+                    status: 'processing',
+                    msg: `La tâche ${taskId} (${toolName}) a commencé son traitement.`,
+                    inParams: params,
+                    ts: new Date().toISOString(),
+                    progress: { current: 0, total: 100, unit: '%' },
+                };
+                sendWebhook(cbUrl, initialProgressOutcome, taskId, toolName, false).catch((e) => jobLog.warn({ err: getErrDetails(e) }, "Échec de l'envoi du webhook de progression initiale."));
+            }
+            const result = await processor(params, auth, taskId, job);
+            jobLog.info(`Logique du job terminée avec succès.`);
+            outcome = {
+                taskId,
+                status: 'completed',
+                msg: `Tâche ${taskId} (${toolName}) terminée avec succès.`,
+                result,
+                inParams: params,
+                ts: new Date().toISOString(),
+                progress: { current: 100, total: 100, unit: '%' },
+            };
+            return result;
+        }
+        catch (error) {
+            const errDetails = getErrDetails(error);
+            jobLog.error({ err: errDetails }, 'Erreur de traitement du job.');
+            outcome = {
+                taskId,
+                status: 'error',
+                msg: `La tâche ${taskId} (${toolName}) a échoué : ${errDetails.message}`, // Use .message
+                error: errDetails,
+                inParams: params,
+                ts: new Date().toISOString(),
+            };
+            throw error;
+        }
+        finally {
+            if (cbUrl && outcome) {
+                jobLog.info(`Envoi du webhook final pour ${taskId}, statut : ${outcome.status}`);
+                sendWebhook(cbUrl, outcome, taskId, toolName, false).catch((e) => jobLog.error({ err: getErrDetails(e) }, "Échec de l'envoi du webhook final."));
+            }
+        }
+    }, { connection: redisConnection, concurrency: config.NODE_ENV === 'development' ? 2 : 5 });
+    worker.on('completed', (job, res) => {
+        workerLog.info({ jobId: job.id, taskId: job.data.taskId, resPreview: JSON.stringify(res)?.substring(0, 50) }, `Job terminé.`);
+    });
+    worker.on('failed', async (job, err) => {
+        const rawErrorDetails = getErrDetails(err);
+        const attemptsMade = job?.attemptsMade || 0;
+        const maxAttempts = job?.opts?.attempts || (taskQueue.defaultJobOptions.attempts ?? 3);
+        const logPayload = {
+            jobId: job?.id,
+            taskId: job?.data?.taskId,
+            err: rawErrorDetails,
+            attemptsMade,
+            maxAttempts,
+        };
+        if (job && attemptsMade >= maxAttempts) {
+            workerLog.error(logPayload, `ÉCHEC FINAL DU JOB (après ${attemptsMade} tentatives): ${rawErrorDetails.message}. Déplacement vers la DLQ.` // Use .message
+            );
+            if (deadLetterQueue && job.data) {
+                try {
+                    await deadLetterQueue.add(job.name, { ...job.data, originalJobId: job.id, failureReason: rawErrorDetails }, {
+                        removeOnComplete: true,
+                        removeOnFail: false,
+                    });
+                    workerLog.info({ ...logPayload, dlq: DEAD_LETTER_QUEUE_NAME }, `Job déplacé vers la DLQ.`);
+                }
+                catch (dlqError) {
+                    workerLog.error({ ...logPayload, dlqError: getErrDetails(dlqError) }, `Échec du déplacement du job vers la DLQ.`);
+                }
+            }
+        }
+        else {
+            workerLog.warn(logPayload, `Job échoué (tentative ${attemptsMade}/${maxAttempts}): ${rawErrorDetails.message}. Nouvelle tentative prévue si applicable.` // Use .message
+            );
+        }
+    });
+    worker.on('error', (err) => {
+        const errDetails = getErrDetails(err);
+        workerLog.error({ err: errDetails }, `Erreur du Worker : ${errDetails.message}`); // Use .message
+    });
+    async function gracefulShutdown(signal) {
+        workerLog.warn(`Signal ${signal} reçu. Fermeture du worker...`);
+        try {
+            await worker.close();
+            workerLog.info('Worker fermé avec succès.');
+            process.exit(0);
+        }
+        catch (err) {
+            workerLog.error({ err: getErrDetails(err) }, 'Erreur lors de la fermeture du worker.');
+            process.exit(1);
+        }
+    }
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    workerLog.info(`Worker pour la file d'attente '${Q_NAME}' démarré avec une concurrence de ${worker.opts.concurrency}. Prêt à traiter les tâches.`);
+    return worker;
+}
+// Call initWorker if not in a test environment
+if (process.env.NODE_ENV !== 'test') {
+    import('./logger.js').then(({ default: actualLogger }) => {
+        import('./config.js').then(({ config: actualConfig }) => {
+            initWorker(actualLogger, actualConfig);
+        });
+    });
+}
+//# sourceMappingURL=worker.js.map
