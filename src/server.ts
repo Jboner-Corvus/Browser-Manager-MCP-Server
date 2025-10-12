@@ -145,7 +145,7 @@ export async function applicationEntryPoint() {
       },
     });
     logger.info(
-      `🚀 Serveur FastMCP démarré et à l'écoute sur http://localhost:${config.PORT}${config.HTTP_STREAM_ENDPOINT}`
+      `🚀 Serveur FastMCP démarré et à l'écoute sur http://localhost:${config.PORT}/mcp`
     );
   } catch (error) {
     logger.fatal({ err: getErrDetails(error) }, 'Échec critique lors du démarrage du serveur.');

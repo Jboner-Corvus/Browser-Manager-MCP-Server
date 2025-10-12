@@ -8,7 +8,7 @@
     "build": "tsc",
     "postbuild": "copy prod-package.json dist\\package.json && copy prod-README.md dist\\README.md && copy .env.example dist\\.env && copy scripts\\start-prod.ps1 dist\\ && powershell -Command \"Get-ChildItem -Path dist -Filter *.js | ForEach-Object { npx terser $_.FullName --compress --mangle --module --output $_.FullName }\" && powershell -Command \"New-Item -ItemType Directory -Force -Path dist\\lib,dist\\lib\\tools,dist\\lib\\utils | Out-Null; Get-ChildItem -Path dist -Filter *.js | Move-Item -Destination dist\\lib\\ -Force; Get-ChildItem -Path dist\\tools -Filter *.js | Move-Item -Destination dist\\lib\\tools\\ -Force; Get-ChildItem -Path dist\\utils -Filter *.js | Move-Item -Destination dist\\lib\\utils\\ -Force; Remove-Item -Recurse -Force dist\\tools; Remove-Item -Recurse -Force dist\\utils\"",
     "start": "npm run start:server",
-    "start:server": "node dist/server.js",
+    "start:server": "node dist/lib/server.js",
     "start:worker": "node dist/worker.js",
     "dev": "npm run dev:server & npm run dev:worker",
     "dev:server": "NODE_ENV=development ts-node --esm src/server.ts",
