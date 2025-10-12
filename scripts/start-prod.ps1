@@ -10,4 +10,4 @@ if (-not (Test-Path ".env")) {
 $env:NODE_ENV = "production"
 
 Write-Host "Démarrage du serveur en mode production..." -ForegroundColor Green
-node server.js
+node lib/server.js
