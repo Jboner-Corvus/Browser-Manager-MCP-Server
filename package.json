@@ -5,7 +5,8 @@
   "main": "dist/server.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:extension && tsc",
+    "build:extension": "cd extension && npm run build",
     "postbuild": "copy prod-package.json dist\\package.json && copy prod-README.md dist\\README.md && copy .env.example dist\\.env && copy scripts\\start-prod.ps1 dist\\ && powershell -Command \"Get-ChildItem -Path dist -Filter *.js | ForEach-Object { npx terser $_.FullName --compress --mangle --module --output $_.FullName }\" && powershell -Command \"New-Item -ItemType Directory -Force -Path dist\\lib,dist\\lib\\tools,dist\\lib\\utils | Out-Null; Get-ChildItem -Path dist -Filter *.js | Move-Item -Destination dist\\lib\\ -Force; Get-ChildItem -Path dist\\tools -Filter *.js | Move-Item -Destination dist\\lib\\tools\\ -Force; Get-ChildItem -Path dist\\utils -Filter *.js | Move-Item -Destination dist\\lib\\utils\\ -Force; Remove-Item -Recurse -Force dist\\tools; Remove-Item -Recurse -Force dist\\utils\"",
     "start": "npm run start:server",
     "start:server": "node dist/lib/server.js",
@@ -19,7 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",
-    "clean": "rm -rf dist node_modules coverage libs",
+    "clean": "if exist dist rmdir /s /q dist && if exist node_modules rmdir /s /q node_modules && if exist coverage rmdir /s /q coverage && if exist libs rmdir /s /q libs",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v",

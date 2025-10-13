@@ -35,6 +35,13 @@ import {
   listExternalBrowserTabsTool,
   browserSnapshotTool,
 } from './tools/browserTools.js';
+import { pdfTools } from './tools/pdfTools.js';
+import { visionTools } from './tools/visionTools.js';
+import {
+  CapabilityManager,
+  createCapabilityManagerFromArgs,
+  Capability,
+} from './capabilities/index.js';
 import type { AuthData } from './types.js';
 import { getErrDetails } from './utils/errorUtils.js';
 
@@ -69,12 +76,26 @@ export const authHandler = async (req: IncomingMessage): Promise<AuthData> => {
 // =============================================================================
 export async function applicationEntryPoint() {
   logger.info(`Démarrage du serveur en mode ${config.NODE_ENV}...`);
+
+  // Initialiser le gestionnaire de capacités
+  const capabilityManager = new CapabilityManager();
+
+  // Parser les arguments de ligne de commande pour les capacités
+  const processArgs = process.argv.slice(2);
+  const requestedCapabilities = createCapabilityManagerFromArgs(processArgs);
+
+  // Utiliser le gestionnaire de capacités avec les arguments
+  const activeCapabilityManager =
+    requestedCapabilities.getEnabledCapabilities().length > 0
+      ? requestedCapabilities
+      : capabilityManager;
+
   const server = new FastMCP<AuthData>({
     name: 'MCP-Server-Production',
-    version: '2.0.0',
+    version: '2.1.0',
     authenticate: authHandler,
     instructions:
-      "Serveur MCP pour opérations synchrones et asynchrones. Le transport est HTTP Stream. L'authentification Bearer est requise.",
+      "Serveur MCP amélioré avec catégories d'outils et capacités modulaires. Support PDF, Vision, Performance, Réseau. Transport HTTP Stream.",
 
     health: {
       enabled: true,
@@ -92,28 +113,9 @@ export async function applicationEntryPoint() {
       enabled: false,
     },
   });
-  // Enregistrement des outils
-  server.addTool(launchBrowserTool);
-  server.addTool(listBrowsersTool);
-  server.addTool(detectOpenBrowsersTool);
-  server.addTool(connectExternalBrowserTool);
-  server.addTool(closeBrowserTool);
-  server.addTool(listTabsTool);
-  server.addTool(selectTabTool);
-  server.addTool(newTabTool);
-  server.addTool(closeTabTool);
-  server.addTool(navigateTool);
-  server.addTool(screenshotTool);
-  server.addTool(clickTool);
-  server.addTool(typeTextTool);
-  server.addTool(waitForTool);
-  server.addTool(getHtmlTool);
-  server.addTool(getConsoleLogsTool);
-  server.addTool(evaluateScriptTool);
-  server.addTool(listExternalBrowserTabsTool);
-  server.addTool(browserSnapshotTool);
 
-  const allTools = [
+  // Enregistrement des outils de base
+  const baseTools = [
     launchBrowserTool,
     listBrowsersTool,
     detectOpenBrowsersTool,
@@ -134,6 +136,31 @@ export async function applicationEntryPoint() {
     listExternalBrowserTabsTool,
     browserSnapshotTool,
   ];
+
+  // Ajouter les outils de base
+  baseTools.forEach((tool) => server.addTool(tool));
+
+  // Ajouter les outils des capacités activées
+  const enabledTools = [...baseTools];
+
+  // Capacité PDF
+  if (activeCapabilityManager.isCapabilityEnabled(Capability.PDF)) {
+    pdfTools.forEach((tool) => {
+      // Type assertion pour éviter les erreurs de compatibilité de types
+      server.addTool(tool as any);
+    });
+    enabledTools.push(...pdfTools);
+    logger.info('Capacité PDF activée - Outils PDF enregistrés');
+  }
+
+  // Capacité Vision
+  if (activeCapabilityManager.isCapabilityEnabled(Capability.VISION)) {
+    visionTools.forEach((tool) => server.addTool(tool));
+    enabledTools.push(...visionTools);
+    logger.info('Capacité Vision activée - Outils de vision enregistrés');
+  }
+
+  const allTools = enabledTools;
 
   logger.info(
     {

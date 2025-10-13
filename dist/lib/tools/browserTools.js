@@ -5,12 +5,12 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 const execAsync = promisify(exec);
 // Global state
-const browsers = new Map();
-const contexts = new Map();
-const pages = new Map();
-const consoleLogs = new Map();
-let currentContextId = null;
-let currentPageId = null;
+export const browsers = new Map();
+export const contexts = new Map();
+export const pages = new Map();
+export const consoleLogs = new Map();
+export let currentContextId = null;
+export let currentPageId = null;
 // Tool: launch_browser_with_auto_port
 export const launchBrowserWithAutoPortTool = {
     name: 'launch_browser_with_auto_port',
@@ -32,7 +32,6 @@ export const launchBrowserWithAutoPortTool = {
             .default(9222)
             .describe('Port de départ pour la recherche de port disponible'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         try {
             const { headless, browser: browserType, startPort } = args;
@@ -100,7 +99,6 @@ export const launchBrowserTool = {
             .default('brave')
             .describe('Type de navigateur'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { headless, browser: browserType } = args;
         // Configuration du débogage distant pour tous les navigateurs
@@ -220,7 +218,7 @@ export const listBrowsersTool = {
                 }
             }
         }
-        catch (error) {
+        catch {
             // Ignore errors in external browser detection
         }
         const allBrowsers = [...managedBrowsers, ...externalBrowsers];
@@ -298,38 +296,57 @@ export const connectExternalBrowserTool = {
             .optional()
             .default(9222)
             .describe('Port de debugging distant (optionnel, auto-détection si non spécifié)'),
+        tabId: z
+            .string()
+            .optional()
+            .describe("ID spécifique de l'onglet à contrôler (optionnel, prend le premier onglet si non spécifié)"),
     }),
     execute: async (args, _context) => {
-        const { browserId, debugPort } = args;
+        const { browserId, debugPort, tabId } = args;
         try {
-            // Trouver un port disponible si non spécifié ou si le port spécifié est occupé
-            let portToUse = debugPort;
-            if (debugPort === 9222) {
-                portToUse = await findAvailableDebugPort(9222);
-                if (portToUse !== 9222) {
-                    console.log(`Port 9222 occupé, utilisation du port ${portToUse} à la place`);
+            // D'abord récupérer la liste des onglets disponibles
+            const response = await fetch(`http://localhost:${debugPort}/json/list`);
+            if (!response.ok) {
+                throw new Error(`Impossible d'accéder à l'API CDP sur le port ${debugPort}`);
+            }
+            const tabs = await response.json();
+            if (!tabs || tabs.length === 0) {
+                throw new Error(`Aucun onglet trouvé sur le port ${debugPort}`);
+            }
+            // Sélectionner l'onglet approprié
+            let selectedTab;
+            if (tabId) {
+                selectedTab = tabs.find((tab) => tab.id === tabId);
+                if (!selectedTab) {
+                    throw new Error(`Onglet avec ID ${tabId} non trouvé`);
                 }
             }
-            // Essayer de se connecter au navigateur externe via CDP avec retry
+            else {
+                // Prendre le premier onglet de type "page" (pas iframe)
+                selectedTab = tabs.find((tab) => tab.type === 'page') || tabs[0];
+            }
+            if (!selectedTab.webSocketDebuggerUrl) {
+                throw new Error(`L'onglet sélectionné n'a pas d'URL WebSocket valide`);
+            }
+            // Se connecter au navigateur via CDP endpoint avec retry et gestion d'erreur
             let browser;
             const maxRetries = 3;
-            let connected = false;
+            let lastError = null;
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    browser = await chromium.connect(`ws://localhost:${portToUse}`);
-                    connected = true;
-                    break;
+                    browser = await chromium.connectOverCDP(`http://localhost:${debugPort}`);
+                    break; // Success, exit retry loop
                 }
                 catch (error) {
-                    if (attempt === maxRetries) {
-                        throw error;
+                    lastError = error;
+                    console.log(`Tentative ${attempt}/${maxRetries} échouée: ${lastError.message}`);
+                    if (attempt < maxRetries) {
+                        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second
                     }
-                    // Attendre 1 seconde avant de réessayer
-                    await new Promise((resolve) => setTimeout(resolve, 1000));
                 }
             }
-            if (!connected || !browser) {
-                throw new Error(`Impossible de se connecter après ${maxRetries} tentatives`);
+            if (!browser) {
+                throw new Error(`Impossible de se connecter après ${maxRetries} tentatives. Dernière erreur: ${lastError?.message}`);
             }
             const context = browser.contexts()[0] || (await browser.newContext());
             const contextPages = context.pages();
@@ -355,7 +372,7 @@ export const connectExternalBrowserTool = {
                 });
                 consoleLogs.set(pageId, logs);
             });
-            return `Connecté au navigateur externe ${browserId} sur le port ${portToUse}. ID de contrôle: ${connectedBrowserId}, Page active: ${pageId}`;
+            return `Connecté au navigateur externe ${browserId} sur le port ${debugPort}. Onglet: "${selectedTab.title}" (${selectedTab.url}). ID de contrôle: ${connectedBrowserId}, Page active: ${pageId}`;
         }
         catch (error) {
             throw new Error(`Impossible de se connecter au navigateur ${browserId}: ${error.message}`);
@@ -367,7 +384,6 @@ export const detectOpenBrowsersTool = {
     name: 'detect_open_browsers',
     description: 'Détecte les navigateurs ouverts sur le système',
     parameters: z.object({}),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (_args, _context) => {
         try {
             // Liste des navigateurs à détecter
@@ -410,8 +426,8 @@ export const detectOpenBrowsersTool = {
             }
             return JSON.stringify(allBrowsers, null, 2);
         }
-        catch (error) {
-            throw new Error(`Erreur lors de la détection des navigateurs: ${error.message}`);
+        catch (detectError) {
+            throw new Error(`Erreur lors de la détection des navigateurs: ${detectError.message}`);
         }
     },
 };
@@ -434,7 +450,6 @@ export const closeBrowserTool = {
     parameters: z.object({
         browserId: z.string().describe('ID du navigateur à fermer'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { browserId } = args;
         const browser = browsers.get(browserId);
@@ -491,7 +506,6 @@ export const selectTabTool = {
     parameters: z.object({
         pageId: z.string().describe('ID de la page à sélectionner'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { pageId } = args;
         const page = pages.get(pageId);
@@ -510,7 +524,6 @@ export const newTabTool = {
     parameters: z.object({
         contextId: z.string().optional().describe('ID du contexte, par défaut le courant'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { contextId = currentContextId } = args;
         if (!contextId || !contexts.has(contextId)) {
@@ -566,7 +579,6 @@ export const navigateTool = {
         url: z.string().describe('URL à visiter'),
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { url, pageId = currentPageId } = args;
         if (!pageId || !pages.has(pageId)) {
@@ -590,7 +602,6 @@ export const screenshotTool = {
             .default('screenshot.png')
             .describe("Chemin relatif où sauvegarder la capture d'écran"),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { pageId = currentPageId, fullPage, path } = args;
         if (!pageId || !pages.has(pageId)) {
@@ -620,7 +631,6 @@ export const clickTool = {
             .default(true)
             .describe('Attendre que le sélecteur soit disponible'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { selector, pageId = currentPageId, force, timeout, waitForSelector } = args;
         if (!pageId || !pages.has(pageId)) {
@@ -663,8 +673,8 @@ export const clickTool = {
                 }, selector);
                 return 'Cliqué avec succès (via JavaScript)';
             }
-            catch (jsError) {
-                throw new Error(`Échec du clic: ${error.message}. Tentative JavaScript échouée: ${jsError.message}`);
+            catch {
+                throw new Error(`Échec du clic: ${error.message}. Tentative JavaScript échouée`);
             }
         }
     },
@@ -721,7 +731,6 @@ export const typeTextTool = {
             .default(true)
             .describe('Attendre que le sélecteur soit disponible'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { selector, text, pageId = currentPageId, timeout, clearFirst, force, waitForSelector, } = args;
         if (!pageId || !pages.has(pageId)) {
@@ -739,7 +748,7 @@ export const typeTextTool = {
                     targetElement = await page.$(selector);
                     foundStrategy = 'standard';
                 }
-                catch (waitError) {
+                catch {
                     // Si l'attente échoue, essayer des stratégies alternatives
                     foundStrategy = 'fallback';
                 }
@@ -844,7 +853,7 @@ export const typeTextTool = {
                             return 'Texte tapé avec succès (fill)';
                         }
                     }
-                    catch (fillError) {
+                    catch {
                         // Si fill échoue, essayer type
                     }
                 }
@@ -967,8 +976,8 @@ export const typeTextTool = {
                 throw new Error(`Échec de la saisie de texte: ${error.message} (stratégie: ${foundStrategy})`);
             }
         }
-        catch (error) {
-            throw new Error(`Échec de la saisie de texte: ${error.message}`);
+        catch (launchError) {
+            throw new Error(`Erreur lors du lancement du navigateur: ${launchError.message}`);
         }
     },
 };
@@ -984,7 +993,6 @@ export const waitForTool = {
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
         hidden: z.boolean().optional().default(false).describe('Attendre même les éléments cachés'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         const { text, selector, time, timeout, pageId = currentPageId, hidden } = args;
         if (!pageId || !pages.has(pageId)) {
@@ -1001,7 +1009,7 @@ export const waitForTool = {
                     });
                     return `Texte "${text}" trouvé avec succès`;
                 }
-                catch (textError) {
+                catch {
                     // Stratégie de repli : chercher dans tout le document
                     const found = await page.evaluate(([searchText, isHidden]) => {
                         const elements = document.querySelectorAll('*');
@@ -1027,7 +1035,7 @@ export const waitForTool = {
                     await page.waitForSelector(selector, { timeout, state: hidden ? 'attached' : 'visible' });
                     return `Sélecteur "${selector}" trouvé avec succès`;
                 }
-                catch (selectorError) {
+                catch {
                     // Stratégie de repli : chercher avec des critères plus larges
                     const found = await page.evaluate(([sel, isHidden]) => {
                         try {
@@ -1056,8 +1064,8 @@ export const waitForTool = {
                 throw new Error('Veuillez spécifier soit "text", soit "selector", soit "time"');
             }
         }
-        catch (error) {
-            throw new Error(`Erreur lors de l'attente: ${error.message}`);
+        catch (_error) {
+            throw new Error(`Erreur lors de l'attente: ${_error.message}`);
         }
     },
 };
@@ -1078,9 +1086,8 @@ export const getHtmlTool = {
             .describe('Nombre maximum de caractères à retourner'),
         truncate: z.boolean().optional().default(true).describe('Tronquer le HTML si trop volumineux'),
     }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
-        const { pageId = currentPageId, selector, maxChars, truncate } = args;
+        const { pageId = currentPageId, selector, maxChars } = args;
         if (!pageId || !pages.has(pageId)) {
             throw new Error('Aucune page active');
         }
@@ -1100,9 +1107,9 @@ export const getHtmlTool = {
                 html = await page.content();
             }
             // Limiter la taille de la réponse si nécessaire
-            if (html.length > maxChars && truncate) {
+            if (html.length > maxChars) {
                 const truncatedHtml = html.substring(0, maxChars) +
-                    '...\n\n[HTML tronqué - utilisez les paramètres maxChars ou truncate: false pour voir plus]';
+                    '...\n\n[HTML tronqué - utilisez les paramètres maxChars pour voir plus]';
                 return JSON.stringify({
                     html: truncatedHtml,
                     totalLength: html.length,
@@ -1120,8 +1127,8 @@ export const getHtmlTool = {
             };
             return JSON.stringify(result, null, 2);
         }
-        catch (error) {
-            throw new Error(`Erreur lors de la récupération du HTML: ${error.message}`);
+        catch (htmlError) {
+            throw new Error(`Erreur lors de la récupération du HTML: ${htmlError.message}`);
         }
     },
 };
@@ -1141,7 +1148,7 @@ export const getConsoleLogsTool = {
         truncate: z.boolean().optional().default(true).describe('Tronquer les logs si trop volumineux'),
     }),
     execute: async (args, _context) => {
-        const { pageId = currentPageId, maxLogs, level, since, search, truncate } = args;
+        const { pageId = currentPageId, maxLogs, level, since, search } = args;
         if (!pageId || !consoleLogs.has(pageId)) {
             throw new Error('Aucune page active ou pas de logs');
         }
@@ -1253,10 +1260,26 @@ export const browserSnapshotTool = {
     description: `Capture un instantané complet de la page avec accessibilité et structure sémantique. C'est l'outil le plus puissant pour obtenir le contenu de la page rapidement car il capture d'accessibilité complète, structure sémantique riche, texte extrait lisible, éléments interactifs identifiés, positions et tailles exactes, états visibles.`,
     parameters: z.object({
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
-        includeText: z.boolean().optional().default(true).describe('Inclure le contenu textuel extrait'),
-        includeForms: z.boolean().optional().default(true).describe('Inclure les informations sur les formulaires'),
-        includeLinks: z.boolean().optional().default(true).describe('Inclure les informations sur les liens'),
-        maxElements: z.number().optional().default(1000).describe('Nombre maximum d\'éléments à retourner'),
+        includeText: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe('Inclure le contenu textuel extrait'),
+        includeForms: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe('Inclure les informations sur les formulaires'),
+        includeLinks: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe('Inclure les informations sur les liens'),
+        maxElements: z
+            .number()
+            .optional()
+            .default(1000)
+            .describe("Nombre maximum d'éléments à retourner"),
     }),
     execute: async (args, _context) => {
         const { pageId = currentPageId, includeText, includeForms, includeLinks, maxElements } = args;
@@ -1353,8 +1376,8 @@ export const browserSnapshotTool = {
                         return Array.from(textSet).join('\n');
                     });
                 }
-                catch (error) {
-                    textContent = 'Erreur lors de l\'extraction du texte';
+                catch {
+                    textContent = "Erreur lors de l'extraction du texte";
                 }
             }
             // Collecter les informations sur les formulaires si demandé
@@ -1369,7 +1392,7 @@ export const browserSnapshotTool = {
                             const formData = {
                                 action: form.action || '',
                                 method: form.method || 'get',
-                                inputs: Array.from(inputs).map(input => ({
+                                inputs: Array.from(inputs).map((input) => ({
                                     type: input.type || 'text',
                                     name: input.name || '',
                                     placeholder: input.placeholder || '',
@@ -1382,8 +1405,9 @@ export const browserSnapshotTool = {
                         return formsData;
                     });
                 }
-                catch (error) {
+                catch (formsError) {
                     forms = [];
+                    console.warn('Erreur extraction formulaires:', formsError);
                 }
             }
             // Collecter les informations sur les liens si demandé
@@ -1407,8 +1431,9 @@ export const browserSnapshotTool = {
                         return linksData;
                     });
                 }
-                catch (error) {
+                catch (linksError) {
                     links = [];
+                    console.warn('Erreur extraction liens:', linksError);
                 }
             }
             // Construire la réponse finale

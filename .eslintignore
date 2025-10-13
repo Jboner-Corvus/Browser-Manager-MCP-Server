@@ -1,0 +1,18 @@
+# Ignorer les fichiers de build et d'extension
+extension/build/
+extension/dist/
+dist/
+node_modules/
+
+# Ignorer les fichiers de configuration
+*.config.js
+*.config.mjs
+*.config.ts
+
+# Ignorer les fichiers de test
+*.test.js
+*.test.ts
+coverage/
+
+# Ignorer les scripts de build
+scripts/
