@@ -11,31 +11,38 @@ const pages = new Map();
 const consoleLogs = new Map();
 let currentContextId = null;
 let currentPageId = null;
-// Tool: launch_browser
-export const launchBrowserTool = {
-    name: 'launch_browser',
-    description: 'Lance un nouveau navigateur',
+// Tool: launch_browser_with_auto_port
+export const launchBrowserWithAutoPortTool = {
+    name: 'launch_browser_with_auto_port',
+    description: 'Lance un navigateur avec gestion automatique des ports pour éviter les conflits',
     parameters: z.object({
         headless: z
             .boolean()
             .optional()
-            .default(true)
+            .default(false)
             .describe('Exécuter le navigateur en mode headless'),
         browser: z
             .enum(['chromium', 'firefox', 'webkit', 'brave'])
             .optional()
             .default('brave')
             .describe('Type de navigateur'),
+        startPort: z
+            .number()
+            .optional()
+            .default(9222)
+            .describe('Port de départ pour la recherche de port disponible'),
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
         try {
-            const { headless, browser: browserType } = args;
+            const { headless, browser: browserType, startPort } = args;
+            // Trouver un port disponible automatiquement
+            const debugPort = await findAvailableDebugPort(startPort);
             // Configuration du débogage distant pour tous les navigateurs
             const launchOptions = {
                 headless,
                 args: [
-                    '--remote-debugging-port=9222',
+                    `--remote-debugging-port=${debugPort}`,
                     '--disable-web-security',
                     '--disable-features=VizDisplayCompositor',
                 ],
@@ -70,11 +77,72 @@ export const launchBrowserTool = {
                 });
                 consoleLogs.set(pageId, logs);
             });
-            return `Navigateur lancé. ID: ${browserId}, Contexte: ${contextId}, Page: ${pageId}`;
+            return `Navigateur lancé avec succès ! ID: ${browserId}, Port de debugging: ${debugPort}, Contexte: ${contextId}, Page: ${pageId}`;
         }
         catch (error) {
             throw new Error(`Erreur lors du lancement du navigateur: ${error.message}`);
         }
+    },
+};
+// Tool: launch_browser (original)
+export const launchBrowserTool = {
+    name: 'launch_browser',
+    description: 'Lance un nouveau navigateur',
+    parameters: z.object({
+        headless: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe('Exécuter le navigateur en mode headless'),
+        browser: z
+            .enum(['chromium', 'firefox', 'webkit', 'brave'])
+            .optional()
+            .default('brave')
+            .describe('Type de navigateur'),
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    execute: async (args, _context) => {
+        const { headless, browser: browserType } = args;
+        // Configuration du débogage distant pour tous les navigateurs
+        const launchOptions = {
+            headless,
+            args: [
+                '--remote-debugging-port=9222',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+            ],
+        };
+        // Configuration spécifique pour Chromium/Chrome/Brave
+        if (browserType === 'chromium' || browserType === 'brave') {
+            launchOptions.args.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding');
+        }
+        const browser = await (browserType === 'chromium' || browserType === 'brave'
+            ? chromium
+            : browserType === 'firefox'
+                ? firefox
+                : webkit).launch(launchOptions);
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        const browserId = `browser_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const contextId = `context_${browserId}`;
+        const pageId = `page_${contextId}_0`;
+        browsers.set(browserId, browser);
+        contexts.set(contextId, context);
+        pages.set(pageId, page);
+        currentContextId = contextId;
+        currentPageId = pageId;
+        // Setup console logging
+        consoleLogs.set(pageId, []);
+        page.on('console', (msg) => {
+            const logs = consoleLogs.get(pageId) || [];
+            logs.push({
+                type: msg.type(),
+                text: msg.text(),
+                timestamp: Date.now(),
+            });
+            consoleLogs.set(pageId, logs);
+        });
+        return `Navigateur lancé. ID: ${browserId}, Contexte: ${contextId}, Page: ${pageId}`;
     },
 };
 // Tool: list_browsers
@@ -157,6 +225,141 @@ export const listBrowsersTool = {
         }
         const allBrowsers = [...managedBrowsers, ...externalBrowsers];
         return JSON.stringify(allBrowsers, null, 2);
+    },
+};
+// Gestionnaire de ports automatique avec système de verrouillage
+class PortManager {
+    static instance;
+    usedPorts = new Set();
+    portLocks = new Map(); // port -> timestamp
+    static getInstance() {
+        if (!PortManager.instance) {
+            PortManager.instance = new PortManager();
+        }
+        return PortManager.instance;
+    }
+    async findAvailableDebugPort(startPort = 9222) {
+        const maxPort = startPort + 100; // Essayer jusqu'à 100 ports
+        const currentTime = Date.now();
+        // Nettoyer les verrous expirés (plus de 5 minutes)
+        for (const [port, timestamp] of this.portLocks.entries()) {
+            if (currentTime - timestamp > 5 * 60 * 1000) {
+                this.portLocks.delete(port);
+                this.usedPorts.delete(port);
+            }
+        }
+        for (let port = startPort; port <= maxPort; port++) {
+            if (this.usedPorts.has(port))
+                continue;
+            try {
+                // Vérifier si le port est disponible
+                const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
+                if (!stdout.includes(`:${port}`)) {
+                    // Port disponible, le marquer comme utilisé
+                    this.usedPorts.add(port);
+                    this.portLocks.set(port, currentTime);
+                    return port;
+                }
+            }
+            catch {
+                // Si netstat échoue, considérer le port comme disponible
+                this.usedPorts.add(port);
+                this.portLocks.set(port, currentTime);
+                return port;
+            }
+        }
+        // Si aucun port n'est disponible, retourner un port au hasard dans une plage élevée
+        const fallbackPort = 9200 + Math.floor(Math.random() * 100);
+        this.usedPorts.add(fallbackPort);
+        this.portLocks.set(fallbackPort, currentTime);
+        return fallbackPort;
+    }
+    releasePort(port) {
+        this.usedPorts.delete(port);
+        this.portLocks.delete(port);
+    }
+    getUsedPorts() {
+        return Array.from(this.usedPorts);
+    }
+}
+// Fonction utilitaire pour trouver un port de debugging disponible
+async function findAvailableDebugPort(startPort = 9222) {
+    const portManager = PortManager.getInstance();
+    return await portManager.findAvailableDebugPort(startPort);
+}
+// Tool: connect_external_browser
+export const connectExternalBrowserTool = {
+    name: 'connect_external_browser',
+    description: 'Se connecte à un navigateur externe en mode debug pour le contrôler',
+    parameters: z.object({
+        browserId: z.string().describe('ID du navigateur externe (ex: "Google Chrome_1234")'),
+        debugPort: z
+            .number()
+            .optional()
+            .default(9222)
+            .describe('Port de debugging distant (optionnel, auto-détection si non spécifié)'),
+    }),
+    execute: async (args, _context) => {
+        const { browserId, debugPort } = args;
+        try {
+            // Trouver un port disponible si non spécifié ou si le port spécifié est occupé
+            let portToUse = debugPort;
+            if (debugPort === 9222) {
+                portToUse = await findAvailableDebugPort(9222);
+                if (portToUse !== 9222) {
+                    console.log(`Port 9222 occupé, utilisation du port ${portToUse} à la place`);
+                }
+            }
+            // Essayer de se connecter au navigateur externe via CDP avec retry
+            let browser;
+            const maxRetries = 3;
+            let connected = false;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    browser = await chromium.connect(`ws://localhost:${portToUse}`);
+                    connected = true;
+                    break;
+                }
+                catch (error) {
+                    if (attempt === maxRetries) {
+                        throw error;
+                    }
+                    // Attendre 1 seconde avant de réessayer
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                }
+            }
+            if (!connected || !browser) {
+                throw new Error(`Impossible de se connecter après ${maxRetries} tentatives`);
+            }
+            const context = browser.contexts()[0] || (await browser.newContext());
+            const contextPages = context.pages();
+            const page = contextPages[0] || (await context.newPage());
+            // Générer un ID unique pour ce navigateur connecté
+            const connectedBrowserId = `connected_${browserId}_${Date.now()}`;
+            const contextId = `context_${connectedBrowserId}`;
+            const pageId = `page_${contextId}_0`;
+            // Stocker les références
+            browsers.set(connectedBrowserId, browser);
+            contexts.set(contextId, context);
+            pages.set(pageId, page);
+            currentContextId = contextId;
+            currentPageId = pageId;
+            // Setup console logging
+            consoleLogs.set(pageId, []);
+            page.on('console', (msg) => {
+                const logs = consoleLogs.get(pageId) || [];
+                logs.push({
+                    type: msg.type(),
+                    text: msg.text(),
+                    timestamp: Date.now(),
+                });
+                consoleLogs.set(pageId, logs);
+            });
+            return `Connecté au navigateur externe ${browserId} sur le port ${portToUse}. ID de contrôle: ${connectedBrowserId}, Page active: ${pageId}`;
+        }
+        catch (error) {
+            throw new Error(`Impossible de se connecter au navigateur ${browserId}: ${error.message}`);
+        }
     },
 };
 // Tool: detect_open_browsers
@@ -400,9 +603,17 @@ export const clickTool = {
     parameters: z.object({
         selector: z.string().describe("Sélecteur CSS ou description de l'élément"),
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
-        force: z.boolean().optional().default(false).describe('Forcer le clic même si l élément est caché ou bloqué'),
+        force: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe('Forcer le clic même si l élément est caché ou bloqué'),
         timeout: z.number().optional().default(30000).describe('Timeout en millisecondes'),
-        waitForSelector: z.boolean().optional().default(true).describe('Attendre que le sélecteur soit disponible'),
+        waitForSelector: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe('Attendre que le sélecteur soit disponible'),
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
@@ -494,12 +705,20 @@ export const typeTextTool = {
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
         timeout: z.number().optional().default(30000).describe('Timeout en millisecondes'),
         clearFirst: z.boolean().optional().default(true).describe('Effacer le contenu avant de taper'),
-        force: z.boolean().optional().default(false).describe('Forcer la saisie même si l élément est caché'),
-        waitForSelector: z.boolean().optional().default(true).describe('Attendre que le sélecteur soit disponible'),
+        force: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe('Forcer la saisie même si l élément est caché'),
+        waitForSelector: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe('Attendre que le sélecteur soit disponible'),
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
-        const { selector, text, pageId = currentPageId, timeout, clearFirst, force, waitForSelector } = args;
+        const { selector, text, pageId = currentPageId, timeout, clearFirst, force, waitForSelector, } = args;
         if (!pageId || !pages.has(pageId)) {
             throw new Error('Aucune page active');
         }
@@ -530,7 +749,7 @@ export const typeTextTool = {
                     '.ace_content',
                     'textarea',
                     'input[type="text"]',
-                    '[contenteditable="true"]'
+                    '[contenteditable="true"]',
                 ];
                 for (const sel of aceSelectors) {
                     try {
@@ -566,7 +785,8 @@ export const typeTextTool = {
                         ];
                         for (const candidate of candidates) {
                             if (candidate &&
-                                (candidate.offsetWidth > 0 || candidate.offsetHeight > 0 ||
+                                (candidate.offsetWidth > 0 ||
+                                    candidate.offsetHeight > 0 ||
                                     window.getComputedStyle(candidate).display !== 'none')) {
                                 return candidate;
                             }
@@ -634,12 +854,16 @@ export const typeTextTool = {
                     // Si type échoue, essayer des approches alternatives
                 }
                 // Méthode 3: Rendre l'élément visible et forcer la saisie
-                if (!force && typeError && typeError.message && (typeError.message.includes('not visible') || typeError.message.includes('hidden'))) {
+                if (!force &&
+                    typeError &&
+                    typeError.message &&
+                    (typeError.message.includes('not visible') || typeError.message.includes('hidden'))) {
                     await page.evaluate((element) => {
                         const el = element;
                         if (el) {
                             const originalStyle = el.style.cssText;
-                            el.style.cssText = 'visibility: visible !important; display: block !important; opacity: 1 !important; z-index: 9999 !important;';
+                            el.style.cssText =
+                                'visibility: visible !important; display: block !important; opacity: 1 !important; z-index: 9999 !important;';
                             el.setAttribute('data-original-style', originalStyle);
                             // Forcer le focus
                             el.focus();
@@ -710,7 +934,7 @@ export const typeTextTool = {
                             el.focus();
                             return true;
                         }
-                        throw new Error('Type d\'élément non supporté pour la saisie');
+                        throw new Error("Type d'élément non supporté pour la saisie");
                     }
                     else {
                         throw new Error('Élément non disponible');
@@ -766,7 +990,10 @@ export const waitForTool = {
             if (text) {
                 // Attendre du texte avec plusieurs stratégies
                 try {
-                    await page.waitForSelector(`text=${text}`, { timeout, state: hidden ? 'attached' : 'visible' });
+                    await page.waitForSelector(`text=${text}`, {
+                        timeout,
+                        state: hidden ? 'attached' : 'visible',
+                    });
                     return `Texte "${text}" trouvé avec succès`;
                 }
                 catch (textError) {
@@ -776,7 +1003,7 @@ export const waitForTool = {
                         for (const el of elements) {
                             if (el.textContent && el.textContent.includes(searchText)) {
                                 const style = window.getComputedStyle(el);
-                                if (isHidden || style.display !== 'none' && style.visibility !== 'hidden') {
+                                if (isHidden || (style.display !== 'none' && style.visibility !== 'hidden')) {
                                     return true;
                                 }
                             }
@@ -835,8 +1062,15 @@ export const getHtmlTool = {
     description: 'Récupère le HTML de la page',
     parameters: z.object({
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
-        selector: z.string().optional().describe('Sélecteur CSS pour obtenir le HTML d\'un élément spécifique'),
-        maxChars: z.number().optional().default(5000).describe('Nombre maximum de caractères à retourner'),
+        selector: z
+            .string()
+            .optional()
+            .describe("Sélecteur CSS pour obtenir le HTML d'un élément spécifique"),
+        maxChars: z
+            .number()
+            .optional()
+            .default(5000)
+            .describe('Nombre maximum de caractères à retourner'),
         truncate: z.boolean().optional().default(true).describe('Tronquer le HTML si trop volumineux'),
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -862,13 +1096,14 @@ export const getHtmlTool = {
             }
             // Limiter la taille de la réponse si nécessaire
             if (html.length > maxChars && truncate) {
-                const truncatedHtml = html.substring(0, maxChars) + '...\n\n[HTML tronqué - utilisez les paramètres maxChars ou truncate: false pour voir plus]';
+                const truncatedHtml = html.substring(0, maxChars) +
+                    '...\n\n[HTML tronqué - utilisez les paramètres maxChars ou truncate: false pour voir plus]';
                 return JSON.stringify({
                     html: truncatedHtml,
                     totalLength: html.length,
                     truncated: true,
                     selector: selector || null,
-                    message: `HTML tronqué à ${maxChars} caractères sur ${html.length} caractères au total`
+                    message: `HTML tronqué à ${maxChars} caractères sur ${html.length} caractères au total`,
                 }, null, 2);
             }
             // Retourner le HTML sous forme de chaîne avec métadonnées
@@ -892,7 +1127,10 @@ export const getConsoleLogsTool = {
     parameters: z.object({
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
         maxLogs: z.number().optional().default(100).describe('Nombre maximum de logs à retourner'),
-        level: z.enum(['log', 'info', 'warn', 'error', 'debug']).optional().describe('Filtrer par niveau de log'),
+        level: z
+            .enum(['log', 'info', 'warn', 'error', 'debug'])
+            .optional()
+            .describe('Filtrer par niveau de log'),
         since: z.number().optional().describe('Filtrer les logs depuis ce timestamp (en ms)'),
         search: z.string().optional().describe('Rechercher du texte dans les logs'),
         truncate: z.boolean().optional().default(true).describe('Tronquer les logs si trop volumineux'),
@@ -907,16 +1145,16 @@ export const getConsoleLogsTool = {
         let filteredLogs = logs;
         // Filtrer par niveau
         if (level) {
-            filteredLogs = filteredLogs.filter(log => log.type === level);
+            filteredLogs = filteredLogs.filter((log) => log.type === level);
         }
         // Filtrer par timestamp
         if (since) {
-            filteredLogs = filteredLogs.filter(log => log.timestamp >= since);
+            filteredLogs = filteredLogs.filter((log) => log.timestamp >= since);
         }
         // Filtrer par recherche de texte
         if (search) {
             const searchTerm = search.toLowerCase();
-            filteredLogs = filteredLogs.filter(log => log.text.toLowerCase().includes(searchTerm));
+            filteredLogs = filteredLogs.filter((log) => log.text.toLowerCase().includes(searchTerm));
         }
         // Limiter le nombre de logs
         if (filteredLogs.length > maxLogs) {
@@ -932,8 +1170,8 @@ export const getConsoleLogsTool = {
                 level,
                 since,
                 search,
-                maxLogs
-            }
+                maxLogs,
+            },
         };
         // Retourner sous forme de chaîne JSON
         return JSON.stringify(result, null, 2);
@@ -946,7 +1184,11 @@ export const evaluateScriptTool = {
     parameters: z.object({
         script: z.string().describe('Code JavaScript à exécuter'),
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
-        safeMode: z.boolean().optional().default(true).describe('Mode sécurisé pour éviter les erreurs fatales'),
+        safeMode: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe('Mode sécurisé pour éviter les erreurs fatales'),
     }),
     execute: async (args, _context) => {
         const { script, pageId = currentPageId, safeMode } = args;
@@ -1011,88 +1253,120 @@ export const listExternalBrowserTabsTool = {
             .describe('Nom du navigateur (chrome, brave, edge, firefox). Si non spécifié, liste tous les navigateurs.'),
     }),
     execute: async (args, _context) => {
+        // Timeout global de 30 secondes pour éviter les blocages
+        const GLOBAL_TIMEOUT = 30000;
+        const CDP_TIMEOUT = 5000;
         try {
             const { browserName } = args;
-            // Détecter d'abord les navigateurs ouverts
-            const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq chrome.exe" /FO CSV');
-            const chromeLines = stdout.trim().split('\n');
-            const { stdout: braveStdout } = await execAsync('tasklist /FI "IMAGENAME eq brave.exe" /FO CSV');
-            const braveLines = braveStdout.trim().split('\n');
-            const { stdout: edgeStdout } = await execAsync('tasklist /FI "IMAGENAME eq msedge.exe" /FO CSV');
-            const edgeLines = edgeStdout.trim().split('\n');
-            const { stdout: firefoxStdout } = await execAsync('tasklist /FI "IMAGENAME eq firefox.exe" /FO CSV');
-            const firefoxLines = firefoxStdout.trim().split('\n');
-            const allLines = [...chromeLines, ...braveLines, ...edgeLines, ...firefoxLines];
-            const openBrowsers = [];
-            for (let i = 1; i < allLines.length; i++) {
-                const line = allLines[i].trim();
-                if (line && line !== '"No tasks are running"') {
-                    const parts = line.split(',');
-                    if (parts.length >= 2) {
-                        const name = parts[0].replace(/"/g, '').toLowerCase();
-                        const pid = parts[1].replace(/"/g, '');
-                        if (!browserName || name.includes(browserName.toLowerCase())) {
-                            openBrowsers.push({ name, pid, type: getBrowserType(parts[0].replace(/"/g, '')) });
+            // Créer un AbortController pour le timeout global
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => {
+                controller.abort();
+            }, GLOBAL_TIMEOUT);
+            try {
+                // Détecter d'abord les navigateurs ouverts avec timeout
+                const browserDetectionPromises = [
+                    execAsyncWithTimeout('tasklist /FI "IMAGENAME eq chrome.exe" /FO CSV', controller.signal),
+                    execAsyncWithTimeout('tasklist /FI "IMAGENAME eq brave.exe" /FO CSV', controller.signal),
+                    execAsyncWithTimeout('tasklist /FI "IMAGENAME eq msedge.exe" /FO CSV', controller.signal),
+                    execAsyncWithTimeout('tasklist /FI "IMAGENAME eq firefox.exe" /FO CSV', controller.signal),
+                ];
+                const detectionResults = await Promise.allSettled(browserDetectionPromises);
+                const allLines = [];
+                detectionResults.forEach((result, index) => {
+                    if (result.status === 'fulfilled') {
+                        const stdout = result.value.stdout;
+                        const lines = stdout.trim().split('\n');
+                        allLines.push(...lines);
+                    }
+                    else {
+                        // Log l'erreur mais continue avec les autres navigateurs
+                        console.warn(`Erreur lors de la détection du navigateur ${index}:`, result.reason);
+                    }
+                });
+                const openBrowsers = [];
+                for (let i = 1; i < allLines.length; i++) {
+                    const line = allLines[i]?.trim();
+                    if (line && line !== '"No tasks are running"') {
+                        const parts = line.split(',');
+                        if (parts.length >= 2) {
+                            const name = parts[0].replace(/"/g, '').toLowerCase();
+                            const pid = parts[1].replace(/"/g, '');
+                            if (!browserName || name.includes(browserName.toLowerCase())) {
+                                openBrowsers.push({ name, pid, type: getBrowserType(parts[0].replace(/"/g, '')) });
+                            }
                         }
                     }
                 }
-            }
-            if (openBrowsers.length === 0) {
-                return JSON.stringify({ message: 'Aucun navigateur correspondant trouvé' }, null, 2);
-            }
-            // Grouper les processus par navigateur et essayer de trouver le processus principal
-            const browserGroups = {};
-            for (const browser of openBrowsers) {
-                const key = browser.type;
-                if (!browserGroups[key]) {
-                    browserGroups[key] = [];
+                if (openBrowsers.length === 0) {
+                    clearTimeout(timeoutId);
+                    return JSON.stringify({ message: 'Aucun navigateur correspondant trouvé' }, null, 2);
                 }
-                browserGroups[key].push(browser);
-            }
-            const results = [];
-            for (const [browserType, processes] of Object.entries(browserGroups)) {
-                try {
-                    // Prendre le processus avec le plus grand PID comme processus principal
-                    const mainProcess = processes.reduce((prev, current) => parseInt(current.pid) > parseInt(prev.pid) ? current : prev);
-                    // Essayer de se connecter via CDP
-                    const tabs = await getBrowserTabsViaCDP(mainProcess);
-                    if (tabs.length > 0) {
-                        results.push({
+                // Grouper les processus par navigateur et essayer de trouver le processus principal
+                const browserGroups = {};
+                for (const browser of openBrowsers) {
+                    const key = browser.type;
+                    if (!browserGroups[key]) {
+                        browserGroups[key] = [];
+                    }
+                    browserGroups[key].push(browser);
+                }
+                const browserResults = [];
+                // Traiter chaque groupe de navigateurs avec un timeout par navigateur
+                for (const [browserType, processes] of Object.entries(browserGroups)) {
+                    try {
+                        // Prendre le processus avec le plus grand PID comme processus principal
+                        const mainProcess = processes.reduce((prev, current) => parseInt(current.pid) > parseInt(prev.pid) ? current : prev);
+                        // Essayer de se connecter via CDP avec timeout
+                        const tabsPromise = getBrowserTabsViaCDPWithTimeout(mainProcess, CDP_TIMEOUT, controller.signal);
+                        const tabs = await tabsPromise;
+                        if (tabs.length > 0) {
+                            browserResults.push({
+                                browser: browserType,
+                                mainPid: mainProcess.pid,
+                                totalProcesses: processes.length,
+                                tabs: tabs,
+                                status: 'connected',
+                                note: 'Debugging distant activé - onglets accessibles',
+                            });
+                        }
+                        else {
+                            // Alternative: essayer de lancer une instance Playwright avec timeout
+                            const alternativeTabsPromise = getTabsViaPlaywrightWithTimeout(mainProcess, CDP_TIMEOUT, controller.signal);
+                            const alternativeTabs = await alternativeTabsPromise;
+                            browserResults.push({
+                                browser: browserType,
+                                mainPid: mainProcess.pid,
+                                totalProcesses: processes.length,
+                                tabs: alternativeTabs,
+                                status: alternativeTabs.length > 0 ? 'connected_alternative' : 'no_debugging',
+                                note: alternativeTabs.length > 0
+                                    ? 'Connecté via méthode alternative'
+                                    : 'Debugging distant désactivé - onglets non accessibles. Activez le debugging distant pour voir les onglets.',
+                            });
+                        }
+                    }
+                    catch (error) {
+                        browserResults.push({
                             browser: browserType,
-                            mainPid: mainProcess.pid,
+                            mainPid: processes[0]?.pid || 'unknown',
                             totalProcesses: processes.length,
-                            tabs: tabs,
-                            status: 'connected',
-                            note: 'Debugging distant activé - onglets accessibles',
+                            tabs: [],
+                            status: 'error',
+                            error: `Erreur: ${error.message}`,
                         });
                     }
-                    else {
-                        // Alternative: essayer de lancer une instance Playwright connectée au navigateur existant
-                        const alternativeTabs = await getTabsViaPlaywright(mainProcess);
-                        results.push({
-                            browser: browserType,
-                            mainPid: mainProcess.pid,
-                            totalProcesses: processes.length,
-                            tabs: alternativeTabs,
-                            status: alternativeTabs.length > 0 ? 'connected_alternative' : 'no_debugging',
-                            note: alternativeTabs.length > 0
-                                ? 'Connecté via méthode alternative'
-                                : 'Debugging distant désactivé - onglets non accessibles. Activez le debugging distant pour voir les onglets.',
-                        });
-                    }
                 }
-                catch (error) {
-                    results.push({
-                        browser: browserType,
-                        mainPid: processes[0].pid,
-                        totalProcesses: processes.length,
-                        tabs: [],
-                        status: 'error',
-                        error: `Erreur: ${error.message}`,
-                    });
-                }
+                clearTimeout(timeoutId);
+                return JSON.stringify(browserResults, null, 2);
             }
-            return JSON.stringify(results, null, 2);
+            catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    throw new Error("Timeout: L'opération a pris trop de temps à s'exécuter");
+                }
+                throw error;
+            }
         }
         catch (error) {
             throw new Error(`Erreur lors de la liste des onglets externes: ${error.message}`);
@@ -1321,4 +1595,68 @@ async function estimateTabCount(browser) {
         // En cas d'erreur, retourner une estimation conservatrice
         return 1;
     }
+}
+// Fonction utilitaire pour exécuter execAsync avec timeout
+async function execAsyncWithTimeout(command, signal) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error(`Timeout: ${command}`));
+        }, 10000); // 10 secondes timeout
+        exec(command, { signal }, (error, stdout, stderr) => {
+            clearTimeout(timeoutId);
+            if (error) {
+                if (error.name === 'AbortError') {
+                    reject(new Error('Opération annulée'));
+                }
+                else {
+                    reject(error);
+                }
+            }
+            else {
+                resolve({ stdout, stderr });
+            }
+        });
+    });
+}
+// Fonction utilitaire pour getBrowserTabsViaCDP avec timeout
+async function getBrowserTabsViaCDPWithTimeout(browser, timeout, signal) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error(`Timeout CDP: ${browser.type}`));
+        }, timeout);
+        signal.addEventListener('abort', () => {
+            clearTimeout(timeoutId);
+            reject(new Error('Opération annulée'));
+        });
+        getBrowserTabsViaCDP(browser)
+            .then((result) => {
+            clearTimeout(timeoutId);
+            resolve(result);
+        })
+            .catch((error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+        });
+    });
+}
+// Fonction utilitaire pour getTabsViaPlaywright avec timeout
+async function getTabsViaPlaywrightWithTimeout(browser, timeout, signal) {
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error(`Timeout Playwright: ${browser.type}`));
+        }, timeout);
+        signal.addEventListener('abort', () => {
+            clearTimeout(timeoutId);
+            reject(new Error('Opération annulée'));
+        });
+        getTabsViaPlaywright(browser)
+            .then((result) => {
+            clearTimeout(timeoutId);
+            resolve(result);
+        })
+            .catch((error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+        });
+    });
 }

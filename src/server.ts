@@ -18,6 +18,7 @@ import {
   launchBrowserTool,
   listBrowsersTool,
   detectOpenBrowsersTool,
+  connectExternalBrowserTool,
   closeBrowserTool,
   listTabsTool,
   selectTabTool,
@@ -31,6 +32,7 @@ import {
   getHtmlTool,
   getConsoleLogsTool,
   evaluateScriptTool,
+  listExternalBrowserTabsTool,
 } from './tools/browserTools.js';
 import type { AuthData } from './types.js';
 import { getErrDetails } from './utils/errorUtils.js';
@@ -93,6 +95,7 @@ export async function applicationEntryPoint() {
   server.addTool(launchBrowserTool);
   server.addTool(listBrowsersTool);
   server.addTool(detectOpenBrowsersTool);
+  server.addTool(connectExternalBrowserTool);
   server.addTool(closeBrowserTool);
   server.addTool(listTabsTool);
   server.addTool(selectTabTool);
@@ -106,27 +109,33 @@ export async function applicationEntryPoint() {
   server.addTool(getHtmlTool);
   server.addTool(getConsoleLogsTool);
   server.addTool(evaluateScriptTool);
+  server.addTool(listExternalBrowserTabsTool);
+
+  const allTools = [
+    launchBrowserTool,
+    listBrowsersTool,
+    detectOpenBrowsersTool,
+    connectExternalBrowserTool,
+    closeBrowserTool,
+    listTabsTool,
+    selectTabTool,
+    newTabTool,
+    closeTabTool,
+    navigateTool,
+    screenshotTool,
+    clickTool,
+    typeTextTool,
+    waitForTool,
+    getHtmlTool,
+    getConsoleLogsTool,
+    evaluateScriptTool,
+    listExternalBrowserTabsTool,
+  ];
 
   logger.info(
     {
-      tools: [
-        launchBrowserTool,
-        listBrowsersTool,
-        detectOpenBrowsersTool,
-        closeBrowserTool,
-        listTabsTool,
-        selectTabTool,
-        newTabTool,
-        closeTabTool,
-        navigateTool,
-        screenshotTool,
-        clickTool,
-        typeTextTool,
-        waitForTool,
-        getHtmlTool,
-        getConsoleLogsTool,
-        evaluateScriptTool,
-      ].map((t) => t.name),
+      tools: allTools.map((t) => t.name),
+      totalTools: allTools.length,
     },
     'Outils enregistrés avec succès.'
   );
