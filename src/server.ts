@@ -10,6 +10,7 @@ import type { IncomingMessage } from 'http';
 
 import { FastMCP } from 'fastmcp';
 import type { FastMCPSession, LoggingLevel } from 'fastmcp';
+import { WebSocketServer } from 'ws';
 
 // Imports locaux
 import { config } from './config.js';
@@ -175,6 +176,64 @@ export async function applicationEntryPoint() {
   server.on('disconnect', (event: { session: FastMCPSession<AuthData>; reason?: string }) => {
     logger.warn({ reason: event.reason || 'Non spécifiée' }, 'Session client déconnectée.');
   });
+  // Démarrer le serveur WebSocket pour la communication avec l'extension
+  const wss = new WebSocketServer({ port: 8082 });
+  
+  wss.on('connection', (ws: any) => {
+    logger.info('🔗 Extension connectée au WebSocket relay');
+    
+    ws.on('message', async (message: any) => {
+      try {
+        const data = JSON.parse(message.toString());
+        logger.debug({ data }, 'Message reçu de l\'extension');
+        
+        // Router les commandes CDP vers Brave
+        if (data.method === 'forwardCDPCommand') {
+          try {
+            const response = await fetch(`http://localhost:9222${data.params.sessionId || ''}/cmd/${data.params.method}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(data.params.params || {})
+            });
+            const result = await response.json();
+            ws.send(JSON.stringify({ id: data.id, result }));
+          } catch (error) {
+            logger.error({ err: getErrDetails(error) }, 'Erreur lors du transfert CDP');
+            ws.send(JSON.stringify({ id: data.id, error: (error as Error).message }));
+          }
+        } else if (data.method === 'attachToTab') {
+          // Lister les onglets disponibles
+          try {
+            const tabsResponse = await fetch('http://localhost:9222/json/list');
+            const tabs = await tabsResponse.json();
+            ws.send(JSON.stringify({ 
+              id: data.id, 
+              result: { 
+                targetInfo: tabs[0] || null,
+                allTabs: tabs
+              } 
+            }));
+          } catch (error) {
+            logger.error({ err: getErrDetails(error) }, 'Erreur lors de la récupération des onglets');
+            ws.send(JSON.stringify({ id: data.id, error: (error as Error).message }));
+          }
+        }
+      } catch (error) {
+        logger.error({ err: getErrDetails(error) }, 'Erreur de traitement du message WebSocket');
+      }
+    });
+    
+    ws.on('close', () => {
+      logger.info('Extension déconnectée du WebSocket relay');
+    });
+    
+    ws.on('error', (error: any) => {
+      logger.error({ err: getErrDetails(error) }, 'Erreur WebSocket');
+    });
+  });
+  
+  logger.info('🌐 WebSocket relay démarré sur ws://localhost:8082');
+
   try {
     // FORCER HTTP Stream comme mode par défaut absolu
     // Mode HTTP Stream (défaut) - supporte SSE et stdio
@@ -187,6 +246,9 @@ export async function applicationEntryPoint() {
     });
     logger.info(
       `🚀 Serveur FastMCP démarré en mode HTTP Stream par défaut sur http://localhost:${config.PORT}/mcp (SSE: /sse)`
+    );
+    logger.info(
+      `📡 Extension Brave: connectez-vous à ws://localhost:8082 pour la communication CDP`
     );
   } catch (error) {
     logger.fatal({ err: getErrDetails(error) }, 'Échec critique lors du démarrage du serveur.');

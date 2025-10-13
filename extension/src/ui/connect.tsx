@@ -93,12 +93,11 @@ const ConnectApp: React.FC = () => {
 
       await connectToMCPRelay(relayUrl);
 
-      // If this is a browser_navigate command, hide the tab list and show simple allow/reject
+      // Always show tab list for debugging, even for newTab commands
+      await loadTabs();
+      // If this is a browser_navigate command, also show simple allow/reject
       if (params.get('newTab') === 'true') {
         setNewTab(true);
-        setShowTabList(false);
-      } else {
-        await loadTabs();
       }
     };
     void runAsync();

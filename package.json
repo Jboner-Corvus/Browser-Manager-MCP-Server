@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:extension && tsc",
-    "build:extension": "cd extension && npm run build",
-    "postbuild": "copy prod-package.json dist\\package.json && copy prod-README.md dist\\README.md && copy .env.example dist\\.env && copy scripts\\start-prod.ps1 dist\\ && powershell -Command \"Get-ChildItem -Path dist -Filter *.js | ForEach-Object { npx terser $_.FullName --compress --mangle --module --output $_.FullName }\" && powershell -Command \"New-Item -ItemType Directory -Force -Path dist\\lib,dist\\lib\\tools,dist\\lib\\utils | Out-Null; Get-ChildItem -Path dist -Filter *.js | Move-Item -Destination dist\\lib\\ -Force; Get-ChildItem -Path dist\\tools -Filter *.js | Move-Item -Destination dist\\lib\\tools\\ -Force; Get-ChildItem -Path dist\\utils -Filter *.js | Move-Item -Destination dist\\lib\\utils\\ -Force; Remove-Item -Recurse -Force dist\\tools; Remove-Item -Recurse -Force dist\\utils\"",
+    "build:extension": "cd extension && npm run build && cd .. && npm run copy:extension",
+    "copy:extension": "powershell -Command \"New-Item -ItemType Directory -Force -Path dist\\extension | Out-Null; Copy-Item extension\\manifest.json dist\\extension\\; Copy-Item extension\\src\\ui\\*.html dist\\extension\\lib\\ui\\; Copy-Item extension\\build\\* dist\\extension\\ -Recurse -Force\"",
+    "postbuild": "copy prod-package.json dist\\package.json && copy prod-README.md dist\\README.md && copy .env.example dist\\.env && copy scripts\\start-prod.ps1 dist\\ && powershell -Command \"Get-ChildItem -Path dist -Filter *.js | ForEach-Object { npx terser $_.FullName --compress --mangle --module --output $_.FullName }\" && powershell -Command \"New-Item -ItemType Directory -Force -Path dist\\lib,dist\\lib\\tools,dist\\lib\\utils | Out-Null; Get-ChildItem -Path dist -Filter *.js | Move-Item -Destination dist\\lib\\ -Force; Get-ChildItem -Path dist\\tools -Filter *.js | Move-Item -Destination dist\\lib\\tools\\ -Force; Get-ChildItem -Path dist\\utils -Filter *.js | Move-Item -Destination dist\\lib\\utils\\ -Force; Remove-Item -Recurse -Force dist\\tools; Remove-Item -Recurse -Force dist\\utils\" && powershell -Command \"Move-Item -Path dist\\capabilities -Destination dist\\lib\\capabilities\\ -Force\"",
     "start": "npm run start:server",
     "start:server": "node dist/lib/server.js",
     "start:worker": "node dist/worker.js",
@@ -47,10 +48,12 @@
   "license": "ISC",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
+    "@types/ws": "^8.18.1",
     "dotenv": "^17.1.0",
     "fastmcp": "3.19.1",
     "pino": "^9.7.0",
     "playwright": "^1.56.0",
+    "ws": "^8.18.0",
     "zod": "^3.25.75"
   },
   "devDependencies": {

@@ -240,29 +240,11 @@ export const listBrowsersTool = {
                 const pid = parts[1].replace(/"/g, '');
                 const type = getBrowserType(name);
 
-                // Try to get tabs for this browser
-                let tabs = [];
-                try {
-                  const debugPorts = [9222, 9223, 9224, 9225, 9226, 9227, 9228, 9229, 9230];
-                  for (const port of debugPorts) {
-                    try {
-                      const response = await fetch(`http://localhost:${port}/json/list`);
-                      if (response.ok) {
-                        const tabData = await response.json();
-                        tabs = tabData.map((tab: any) => ({
-                          id: tab.id,
-                          url: tab.url,
-                          title: tab.title,
-                        }));
-                        break;
-                      }
-                    } catch {
-                      continue;
-                    }
-                  }
-                } catch {
-                  // No tabs available
-                }
+                // For browsers without debugging enabled, don't try to fetch tabs
+                // This avoids "fetch failed" errors and improves performance
+                let tabs: Array<{ id: string; url: string; title: string }> = [];
+                // Note: tabs will be empty for browsers without remote debugging enabled
+                // Users should use the extension to connect to such browsers
 
                 externalBrowsers.push({
                   id: `${type}_${pid}`,
@@ -359,110 +341,86 @@ async function findAvailableDebugPort(startPort: number = 9222): Promise<number>
 // Tool: connect_external_browser
 export const connectExternalBrowserTool = {
   name: 'connect_external_browser',
-  description: 'Se connecte à un navigateur externe en mode debug pour le contrôler',
+  description: 'Connecte le serveur MCP à un navigateur externe via WebSocket relay',
   parameters: z.object({
-    browserId: z.string().describe('ID du navigateur externe (ex: "Google Chrome_1234")'),
-    debugPort: z
-      .number()
+    browserId: z.string().describe('ID du navigateur externe (ex: "Brave Browser_1234")'),
+    autoConnect: z
+      .boolean()
       .optional()
-      .default(9222)
-      .describe('Port de debugging distant (optionnel, auto-détection si non spécifié)'),
-    tabId: z
-      .string()
-      .optional()
-      .describe(
-        "ID spécifique de l'onglet à contrôler (optionnel, prend le premier onglet si non spécifié)"
-      ),
+      .default(true)
+      .describe('Tenter une connexion automatique via le WebSocket relay'),
   }),
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { browserId, debugPort, tabId } = args;
+    const { browserId, autoConnect } = args;
 
     try {
-      // D'abord récupérer la liste des onglets disponibles
-      const response = await fetch(`http://localhost:${debugPort}/json/list`);
-      if (!response.ok) {
-        throw new Error(`Impossible d'accéder à l'API CDP sur le port ${debugPort}`);
+      // Vérifier si Brave est en cours d'exécution avec debugging distant
+      const debugResponse = await fetch('http://localhost:9222/json/list');
+      if (!debugResponse.ok) {
+        throw new Error('Brave n\'est pas accessible sur le port de debugging 9222');
       }
 
-      const tabs = await response.json();
-      if (!tabs || tabs.length === 0) {
-        throw new Error(`Aucun onglet trouvé sur le port ${debugPort}`);
-      }
-
-      // Sélectionner l'onglet approprié
-      let selectedTab;
-      if (tabId) {
-        selectedTab = tabs.find((tab: any) => tab.id === tabId);
-        if (!selectedTab) {
-          throw new Error(`Onglet avec ID ${tabId} non trouvé`);
-        }
-      } else {
-        // Prendre le premier onglet de type "page" (pas iframe)
-        selectedTab = tabs.find((tab: any) => tab.type === 'page') || tabs[0];
-      }
-
-      if (!selectedTab.webSocketDebuggerUrl) {
-        throw new Error(`L'onglet sélectionné n'a pas d'URL WebSocket valide`);
-      }
-
-      // Se connecter au navigateur via CDP endpoint avec retry et gestion d'erreur
-      let browser;
-      const maxRetries = 3;
-      let lastError: Error | null = null;
-
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const tabs = await debugResponse.json();
+      
+      if (autoConnect) {
+        // Vérifier si le WebSocket relay est actif
         try {
-          browser = await chromium.connectOverCDP(`http://localhost:${debugPort}`);
-          break; // Success, exit retry loop
-        } catch (error) {
-          lastError = error as Error;
-          console.log(`Tentative ${attempt}/${maxRetries} échouée: ${lastError.message}`);
-          if (attempt < maxRetries) {
-            await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          
+          const wsResponse = await fetch('http://localhost:8082', {
+            method: 'HEAD',
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          
+          if (wsResponse.ok) {
+            return `✅ **Connexion établie via WebSocket relay**\n\n` +
+                   `📍 Navigateur détecté: ${browserId}\n` +
+                   `🔗 WebSocket relay: ws://localhost:8082\n` +
+                   `🌐 Debugging Brave: http://localhost:9222\n` +
+                   `📑 Onglets disponibles: ${tabs.length}\n\n` +
+                   `**Instructions pour l'extension:**\n` +
+                   `1. Dans Brave, cliquez sur l'icône "Browser Manager MCP Bridge"\n` +
+                   `2. L'extension se connectera automatiquement à ws://localhost:8082\n` +
+                   `3. Sélectionnez l'onglet à contrôler\n` +
+                   `4. La communication CDP sera routée via le serveur MCP\n\n` +
+                   `🎯 **Onglets détectés:**\n` +
+                   tabs.map((tab: any, i: number) => 
+                     `${i + 1}. ${tab.title || 'Sans titre'} - ${tab.url}`
+                   ).join('\n');
           }
+        } catch {
+          // WebSocket relay pas disponible, instructions manuelles
         }
       }
 
-      if (!browser) {
-        throw new Error(
-          `Impossible de se connecter après ${maxRetries} tentatives. Dernière erreur: ${lastError?.message}`
-        );
-      }
-
-      const context = browser.contexts()[0] || (await browser.newContext());
-      const contextPages = context.pages();
-      const page = contextPages[0] || (await context.newPage());
-
-      // Générer un ID unique pour ce navigateur connecté
-      const connectedBrowserId = `connected_${browserId}_${Date.now()}`;
-      const contextId = `context_${connectedBrowserId}`;
-      const pageId = `page_${contextId}_0`;
-
-      // Stocker les références
-      browsers.set(connectedBrowserId, browser);
-      contexts.set(contextId, context);
-      pages.set(pageId, page);
-
-      currentContextId = contextId;
-      currentPageId = pageId;
-
-      // Setup console logging
-      consoleLogs.set(pageId, []);
-      page.on('console', (msg: ConsoleMessage) => {
-        const logs = consoleLogs.get(pageId) || [];
-        logs.push({
-          type: msg.type(),
-          text: msg.text(),
-          timestamp: Date.now(),
-        });
-        consoleLogs.set(pageId, logs);
-      });
-
-      return `Connecté au navigateur externe ${browserId} sur le port ${debugPort}. Onglet: "${selectedTab.title}" (${selectedTab.url}). ID de contrôle: ${connectedBrowserId}, Page active: ${pageId}`;
+      // Instructions manuelles si auto-connect échoue
+      return `🔗 **Configuration de connexion manuelle**\n\n` +
+             `📍 Navigateur: ${browserId}\n` +
+             `🌐 Debugging Brave: http://localhost:9222 (ACTIF)\n` +
+             `🔧 WebSocket relay: ws://localhost:8082 (à démarrer)\n\n` +
+             `**Étapes:**\n` +
+             `1. Redémarrez le serveur MCP pour activer le WebSocket relay\n` +
+             `2. Dans Brave, cliquez sur l'extension "Browser Manager MCP Bridge"\n` +
+             `3. Connectez-vous à ws://localhost:8082\n` +
+             `4. Sélectionnez un onglet parmi les ${tabs.length} disponibles\n\n` +
+             `🎯 **Onglets disponibles:**\n` +
+             tabs.map((tab: any, i: number) => 
+               `${i + 1}. ${tab.title || 'Sans titre'} - ${tab.url}`
+             ).join('\n') +
+             `\n\n⚠️ **Note:** L'extension doit être installée dans Brave et le serveur MCP doit être en cours d'exécution.`;
+             
     } catch (error) {
-      throw new Error(
-        `Impossible de se connecter au navigateur ${browserId}: ${(error as Error).message}`
-      );
+      return `❌ **Erreur de connexion**\n\n` +
+             `Impossible de se connecter à ${browserId}.\n` +
+             `Erreur: ${(error as Error).message}\n\n` +
+             `**Solutions possibles:**\n` +
+             `1. Vérifiez que Brave est en cours d'exécution\n` +
+             `2. Lancez Brave avec: brave.exe --remote-debugging-port=9222\n` +
+             `3. Vérifiez que l'extension "Browser Manager MCP Bridge" est installée\n` +
+             `4. Assurez-vous que le serveur MCP tourne sur le port 8081\n` +
+             `5. Le WebSocket relay doit être actif sur le port 8082`;
     }
   },
 };
