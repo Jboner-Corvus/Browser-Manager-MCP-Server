@@ -33,6 +33,7 @@ import {
   getConsoleLogsTool,
   evaluateScriptTool,
   listExternalBrowserTabsTool,
+  browserSnapshotTool,
 } from './tools/browserTools.js';
 import type { AuthData } from './types.js';
 import { getErrDetails } from './utils/errorUtils.js';
@@ -110,6 +111,7 @@ export async function applicationEntryPoint() {
   server.addTool(getConsoleLogsTool);
   server.addTool(evaluateScriptTool);
   server.addTool(listExternalBrowserTabsTool);
+  server.addTool(browserSnapshotTool);
 
   const allTools = [
     launchBrowserTool,
@@ -130,6 +132,7 @@ export async function applicationEntryPoint() {
     getConsoleLogsTool,
     evaluateScriptTool,
     listExternalBrowserTabsTool,
+    browserSnapshotTool,
   ];
 
   logger.info(

@@ -584,16 +584,21 @@ export const screenshotTool = {
     parameters: z.object({
         pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
         fullPage: z.boolean().optional().default(false).describe('Capture de la page complète'),
+        path: z
+            .string()
+            .optional()
+            .default('screenshot.png')
+            .describe("Chemin relatif où sauvegarder la capture d'écran"),
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (args, _context) => {
-        const { pageId = currentPageId, fullPage } = args;
+        const { pageId = currentPageId, fullPage, path } = args;
         if (!pageId || !pages.has(pageId)) {
             throw new Error('Aucune page active');
         }
         const page = pages.get(pageId);
-        await page.screenshot({ fullPage, path: 'screenshot.png' });
-        return "Capture d'écran prise et sauvegardée dans screenshot.png";
+        await page.screenshot({ fullPage, path });
+        return `Capture d'écran prise et sauvegardée dans ${path}`;
     },
 };
 // Tool: click
@@ -1239,6 +1244,195 @@ export const evaluateScriptTool = {
             else {
                 return `Erreur d'exécution du script: ${error.message}`;
             }
+        }
+    },
+};
+// Tool: browser_snapshot
+export const browserSnapshotTool = {
+    name: 'browser_snapshot',
+    description: `Capture un instantané complet de la page avec accessibilité et structure sémantique. C'est l'outil le plus puissant pour obtenir le contenu de la page rapidement car il capture d'accessibilité complète, structure sémantique riche, texte extrait lisible, éléments interactifs identifiés, positions et tailles exactes, états visibles.`,
+    parameters: z.object({
+        pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
+        includeText: z.boolean().optional().default(true).describe('Inclure le contenu textuel extrait'),
+        includeForms: z.boolean().optional().default(true).describe('Inclure les informations sur les formulaires'),
+        includeLinks: z.boolean().optional().default(true).describe('Inclure les informations sur les liens'),
+        maxElements: z.number().optional().default(1000).describe('Nombre maximum d\'éléments à retourner'),
+    }),
+    execute: async (args, _context) => {
+        const { pageId = currentPageId, includeText, includeForms, includeLinks, maxElements } = args;
+        if (!pageId || !pages.has(pageId)) {
+            throw new Error('Aucune page active');
+        }
+        const page = pages.get(pageId);
+        try {
+            // Capturer l'instantané d'accessibilité
+            const accessibilitySnapshot = await page.accessibility.snapshot();
+            // Obtenir le titre de la page
+            const title = await page.title();
+            // Obtenir l'URL actuelle
+            const url = page.url();
+            // Transformer les nœuds d'accessibilité en éléments structurés
+            const elements = [];
+            let elementCount = 0;
+            function processAccessibilityNode(node, parentPath = '') {
+                if (elementCount >= maxElements)
+                    return null;
+                const element = {
+                    uid: `element_${elementCount++}`,
+                    type: node.role || 'unknown',
+                    name: node.name || '',
+                    description: node.description || '',
+                    level: node.level || 0,
+                    value: node.value || '',
+                    checked: node.checked,
+                    disabled: node.disabled,
+                    expanded: node.expanded,
+                    selected: node.selected,
+                    focused: node.focused,
+                    required: node.required,
+                    readonly: node.readonly,
+                    multiline: node.multiline,
+                    invalid: node.invalid,
+                    autocomplete: node.autocomplete,
+                    haspopup: node.haspopup,
+                    orientation: node.orientation,
+                    sort: node.sort,
+                    busy: node.busy,
+                    atomic: node.atomic,
+                    live: node.live,
+                    relevant: node.relevant,
+                    grabbed: node.grabbed,
+                    dropeffect: node.dropeffect,
+                    path: parentPath,
+                };
+                // Ajouter les propriétés de position si disponibles
+                if (node.boundingBox) {
+                    element.position = {
+                        x: Math.round(node.boundingBox.x),
+                        y: Math.round(node.boundingBox.y),
+                    };
+                    element.size = {
+                        width: Math.round(node.boundingBox.width),
+                        height: Math.round(node.boundingBox.height),
+                    };
+                }
+                // Traiter les enfants
+                if (node.children && node.children.length > 0) {
+                    element.children = [];
+                    for (const child of node.children) {
+                        const processedChild = processAccessibilityNode(child, `${parentPath}/child`);
+                        if (processedChild) {
+                            element.children.push(processedChild);
+                        }
+                    }
+                }
+                return element;
+            }
+            // Traiter tous les nœuds racine
+            if (accessibilitySnapshot) {
+                for (const rootNode of accessibilitySnapshot.children || []) {
+                    const processedElement = processAccessibilityNode(rootNode, 'root');
+                    if (processedElement) {
+                        elements.push(processedElement);
+                    }
+                }
+            }
+            // Collecter le contenu textuel si demandé
+            let textContent = '';
+            if (includeText) {
+                try {
+                    textContent = await page.evaluate(() => {
+                        const elements = document.querySelectorAll('*');
+                        const textSet = new Set();
+                        for (const el of elements) {
+                            const text = el.textContent?.trim();
+                            if (text && text.length > 0 && text.length < 1000) {
+                                textSet.add(text);
+                            }
+                        }
+                        return Array.from(textSet).join('\n');
+                    });
+                }
+                catch (error) {
+                    textContent = 'Erreur lors de l\'extraction du texte';
+                }
+            }
+            // Collecter les informations sur les formulaires si demandé
+            let forms = [];
+            if (includeForms) {
+                try {
+                    forms = await page.evaluate(() => {
+                        const formElements = document.querySelectorAll('form, [role="form"]');
+                        const formsData = [];
+                        for (const form of formElements) {
+                            const inputs = form.querySelectorAll('input, textarea, select');
+                            const formData = {
+                                action: form.action || '',
+                                method: form.method || 'get',
+                                inputs: Array.from(inputs).map(input => ({
+                                    type: input.type || 'text',
+                                    name: input.name || '',
+                                    placeholder: input.placeholder || '',
+                                    required: input.required || false,
+                                    value: input.value || '',
+                                })),
+                            };
+                            formsData.push(formData);
+                        }
+                        return formsData;
+                    });
+                }
+                catch (error) {
+                    forms = [];
+                }
+            }
+            // Collecter les informations sur les liens si demandé
+            let links = [];
+            if (includeLinks) {
+                try {
+                    links = await page.evaluate(() => {
+                        const linkElements = document.querySelectorAll('a[href]');
+                        const linksData = [];
+                        for (const link of linkElements) {
+                            const href = link.getAttribute('href');
+                            const text = link.textContent?.trim() || '';
+                            if (href && text) {
+                                linksData.push({
+                                    text: text,
+                                    href: href,
+                                    title: link.getAttribute('title') || '',
+                                });
+                            }
+                        }
+                        return linksData;
+                    });
+                }
+                catch (error) {
+                    links = [];
+                }
+            }
+            // Construire la réponse finale
+            const snapshot = {
+                title,
+                url,
+                timestamp: new Date().toISOString(),
+                elements: elements.slice(0, maxElements),
+                totalElements: elements.length,
+                textContent: includeText ? textContent : null,
+                forms: includeForms ? forms : null,
+                links: includeLinks ? links : null,
+                metadata: {
+                    includeText,
+                    includeForms,
+                    includeLinks,
+                    maxElements,
+                    truncated: elements.length > maxElements,
+                },
+            };
+            return JSON.stringify(snapshot, null, 2);
+        }
+        catch (error) {
+            throw new Error(`Erreur lors de la capture du snapshot: ${error.message}`);
         }
     },
 };
