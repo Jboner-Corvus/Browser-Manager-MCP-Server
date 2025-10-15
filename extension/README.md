@@ -26,10 +26,10 @@ Cette extension Chrome permet de connecter le serveur Browser Manager MCP aux na
    ```
 
 2. **Charger l'extension** :
-   - Ouvrir `chrome://extensions/`
-   - Activer le "Mode développeur"
+   - Ouvrir `chrome://extensions/` (ou `edge://extensions/` pour Edge, `brave://extensions/` pour Brave)
+   - Activer le "Mode développeur" (en haut à droite)
    - Cliquer sur "Charger l'extension non empaquetée"
-   - Sélectionner le dossier `Browser-Manager-MCP-Server-dist/extension/dist`
+   - Sélectionner le dossier `Browser-Manager-MCP-Server-dist/dist/extension`
 
 3. **Configurer le serveur MCP** :
    Dans votre configuration MCP, ajouter :
