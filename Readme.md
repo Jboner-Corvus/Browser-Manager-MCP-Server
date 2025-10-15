@@ -105,15 +105,20 @@ Pour contrôler les navigateurs externes (déjà ouverts), vous devez installer 
 
 #### Installation de l'extension :
 
-L'extension est déjà compilée et empaquetée. Pour l'installer :
+L'extension est déjà compilée et prête à être chargée. Pour l'installer :
 
-1. **Téléchargez l'extension** :
-   - Utilisez le fichier `dist/browser-manager-extension.zip`
+1. **Ouvrez le gestionnaire d'extensions** :
+   - Comet (Perplexity) : `comet://extensions/`
+   - Chrome : `chrome://extensions/`
+   - Brave : `brave://extensions/`
+   - Edge : `edge://extensions/`
 
-2. **Installez dans Chrome/Brave** :
-   - Ouvrez Chrome/Brave et allez à `chrome://extensions/`
-   - Activez le "Mode développeur" (en haut à droite)
-   - Glissez-déposez le fichier `.zip` dans la page des extensions
+2. **Activez le Mode développeur** :
+   - Cochez "Mode développeur" (en haut à droite)
+
+3. **Chargez l'extension non empaquetée** :
+   - Cliquez sur "Charger l'extension non empaquetée"
+   - Sélectionnez le dossier `dist/extension`
    - L'extension devrait s'installer automatiquement
 
 3. **Vérifiez l'installation** :
