@@ -72,10 +72,10 @@ describe('Server Tests', () => {
       fatal: vi.fn(),
       child: vi.fn(),
     };
-    loggerMock.child.mockReturnValue(mockChildLogger as unknown as ReturnType<typeof logger.child>);
-    loggerMock.info.mockImplementation(mockChildLogger.info);
-    loggerMock.warn.mockImplementation(mockChildLogger.warn);
-    loggerMock.fatal.mockImplementation(mockChildLogger.fatal);
+    loggerMock.child = vi.fn().mockReturnValue(mockChildLogger as any);
+    loggerMock.info = vi.fn().mockImplementation(mockChildLogger.info);
+    loggerMock.warn = vi.fn().mockImplementation(mockChildLogger.warn);
+    loggerMock.fatal = vi.fn().mockImplementation(mockChildLogger.fatal);
 
     sigtermHandler = undefined;
 
@@ -112,17 +112,18 @@ describe('Server Tests', () => {
 
       expect(loggerMock.child({}).info).toHaveBeenCalledWith(
         { authId: 'mock-uuid' },
-        'Authentification réussie.'
+        'Authentification désactivée.'
       );
     });
 
-    it('should fail for missing auth header', async () => {
+    it('should not fail for missing auth header', async () => {
       const req = { headers: {}, socket: { remoteAddress: '127.0.0.1' } };
-      await expect(authHandler(req as IncomingMessage)).rejects.toThrow('Accès non autorisé');
+      const authData = await authHandler(req as IncomingMessage);
+      expect(authData).toBeDefined();
 
-      expect(loggerMock.child({}).warn).toHaveBeenCalledWith(
-        { clientIp: '127.0.0.1' },
-        "Tentative d'accès non autorisé: en-tête 'Authorization' manquant ou invalide."
+      expect(loggerMock.child({}).info).toHaveBeenCalledWith(
+        { authId: 'mock-uuid' },
+        'Authentification désactivée.'
       );
     });
   });

@@ -15,8 +15,14 @@ let connectionStatus = {
 // DOM Elements
 let statusElement: HTMLElement | null = null;
 let connectButton: HTMLButtonElement | null = null;
+let disconnectButton: HTMLButtonElement | null = null;
 let wsUrlInput: HTMLInputElement | null = null;
 let tabsList: HTMLElement | null = null;
+let connectedInfoSection: HTMLElement | null = null;
+let connectionSection: HTMLElement | null = null;
+let connectedTabElement: HTMLElement | null = null;
+let uptimeElement: HTMLElement | null = null;
+let connectionStartTime: Date | null = null;
 
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
@@ -29,8 +35,13 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeElements(): void {
   statusElement = document.getElementById('status');
   connectButton = document.getElementById('connectBtn') as HTMLButtonElement;
+  disconnectButton = document.getElementById('disconnectBtn') as HTMLButtonElement;
   wsUrlInput = document.getElementById('wsUrl') as HTMLInputElement;
   tabsList = document.getElementById('tabsList');
+  connectedInfoSection = document.getElementById('connectedInfo');
+  connectionSection = document.getElementById('connectionSection');
+  connectedTabElement = document.getElementById('connectedTab');
+  uptimeElement = document.getElementById('uptime');
 
   if (wsUrlInput) {
     wsUrlInput.value = 'ws://localhost:8084';
@@ -39,13 +50,17 @@ function initializeElements(): void {
 
 function setupEventListeners(): void {
   if (connectButton) {
-    connectButton.addEventListener('click', toggleConnection);
+    connectButton.addEventListener('click', connect);
+  }
+
+  if (disconnectButton) {
+    disconnectButton.addEventListener('click', disconnect);
   }
 
   if (wsUrlInput) {
     wsUrlInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        toggleConnection();
+        connect();
       }
     });
   }
@@ -123,8 +138,9 @@ async function connect(): Promise<void> {
 
     // Success!
     currentTabId = activeTab.id;
+    connectionStartTime = new Date();
     updateStatus('Connecté - MCP Ready', 'connected');
-    setButtonState('connected');
+    showConnectedUI(activeTab);
 
     // Update connection status
     await updateConnectionStatus();
@@ -141,15 +157,15 @@ async function connect(): Promise<void> {
 
 async function disconnect(): Promise<void> {
   updateStatus('Déconnexion...', 'connecting');
-  setButtonState('disconnecting');
 
   try {
     const response = await sendMessage({ type: 'disconnect' });
 
     if (response.success) {
       currentTabId = null;
+      connectionStartTime = null;
       updateStatus('Déconnecté', 'disconnected');
-      setButtonState('disconnected');
+      showDisconnectedUI();
       hideTabsList();
     } else {
       throw new Error(response.error || 'Échec de déconnexion');
@@ -157,7 +173,6 @@ async function disconnect(): Promise<void> {
   } catch (error) {
     console.error('Disconnect error:', error);
     updateStatus(`Erreur: ${(error as Error).message}`, 'error');
-    setButtonState('connected'); // Revert to connected state
   }
 }
 
@@ -165,35 +180,39 @@ async function checkConnectionStatus(): Promise<void> {
   try {
     const response = await sendMessage({ type: 'getConnectionStatus' });
 
-    if (response.success) {
+    if (response.success && response.data) {
       const status = response.data;
       connectionStatus = {
         ...status,
         lastChecked: new Date()
       };
 
-      if (status.isConnected) {
+      if (status.isConnected && status.connectedTabId) {
         currentTabId = status.connectedTabId;
         updateStatus('Connecté - MCP Ready', 'connected');
-        setButtonState('connected');
 
-        // Load tabs if connected
+        // Load tabs to get connected tab info
         const tabsResponse = await sendMessage({ type: 'getTabs' });
         if (tabsResponse.success) {
           const tabs = tabsResponse.data || [];
-          if (Array.isArray(tabs)) {
+          if (Array.isArray(tabs) && tabs.length > 0) {
+            const connectedTab = tabs.find((t: any) => t.id === status.connectedTabId) || tabs[0];
+            showConnectedUI(connectedTab);
             displayTabs(tabs, status.connectedTabId);
           }
         }
       } else {
         updateStatus('Déconnecté', 'disconnected');
-        setButtonState('disconnected');
+        showDisconnectedUI();
       }
+    } else {
+      updateStatus('Déconnecté', 'disconnected');
+      showDisconnectedUI();
     }
   } catch (error) {
     console.error('Status check error:', error);
-    updateStatus('Erreur de vérification du statut', 'error');
-    setButtonState('disconnected');
+    updateStatus('Déconnecté', 'disconnected');
+    showDisconnectedUI();
   }
 }
 
@@ -291,6 +310,16 @@ function hideTabsList(): void {
   if (tabsList) {
     tabsList.style.display = 'none';
   }
+}
+
+function showConnectedUI(tab: any): void {
+  if (connectionSection) connectionSection.style.display = 'none';
+  if (connectedInfoSection) connectedInfoSection.style.display = 'block';
+}
+
+function showDisconnectedUI(): void {
+  if (connectionSection) connectionSection.style.display = 'block';
+  if (connectedInfoSection) connectedInfoSection.style.display = 'none';
 }
 
 function sendMessage(message: any): Promise<any> {

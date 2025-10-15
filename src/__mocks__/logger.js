@@ -4,6 +4,7 @@ const logger = {
   warn: vi.fn(),
   error: vi.fn(),
   fatal: vi.fn(),
-  child: vi.fn(() => logger),
+  child: vi.fn(),
 };
+logger.child.mockReturnValue(logger);
 export default logger;

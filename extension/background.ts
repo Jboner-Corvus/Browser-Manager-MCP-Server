@@ -443,6 +443,7 @@ class ProfessionalExtensionService {
         debugLog(`All tabs with IDs: ${validTabs.length}`);
       }
 
+      debugLog(`Returning ${validTabs.length} tabs:`, validTabs.map(t => ({ id: t.id, url: t.url })));
       return validTabs;
     } catch (error) {
       debugLog('Failed to get tabs:', error);

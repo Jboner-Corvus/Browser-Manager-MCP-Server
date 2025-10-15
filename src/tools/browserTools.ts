@@ -211,7 +211,10 @@ export const launchBrowserWithAutoPortTool = {
             `--user-data-dir=${launchOptions.userDataDir}`,
             `--remote-debugging-port=${debugPort}`,
             '--no-first-run',
-            ...launchOptions.args.filter((arg: string) => !arg.includes('--remote-debugging-port=') && !arg.includes('--user-data-dir'))
+            ...launchOptions.args.filter(
+              (arg: string) =>
+                !arg.includes('--remote-debugging-port=') && !arg.includes('--user-data-dir')
+            ),
           ],
           {
             detached: true,
@@ -731,7 +734,10 @@ export const launchBrowserTool = {
           `--user-data-dir=${launchOptions.userDataDir}`,
           '--remote-debugging-port=9222',
           '--no-first-run',
-          ...launchOptions.args.filter((arg: string) => !arg.includes('--remote-debugging-port=') && !arg.includes('--user-data-dir'))
+          ...launchOptions.args.filter(
+            (arg: string) =>
+              !arg.includes('--remote-debugging-port=') && !arg.includes('--user-data-dir')
+          ),
         ],
         {
           detached: true,

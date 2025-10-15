@@ -8,8 +8,12 @@ let connectionStatus = {
 };
 let statusElement = null;
 let connectButton = null;
+let disconnectButton = null;
 let wsUrlInput = null;
 let tabsList = null;
+let connectedInfoSection = null;
+let connectionSection = null;
+let connectionStartTime = null;
 document.addEventListener("DOMContentLoaded", () => {
   initializeElements();
   setupEventListeners();
@@ -19,20 +23,28 @@ document.addEventListener("DOMContentLoaded", () => {
 function initializeElements() {
   statusElement = document.getElementById("status");
   connectButton = document.getElementById("connectBtn");
+  disconnectButton = document.getElementById("disconnectBtn");
   wsUrlInput = document.getElementById("wsUrl");
   tabsList = document.getElementById("tabsList");
+  connectedInfoSection = document.getElementById("connectedInfo");
+  connectionSection = document.getElementById("connectionSection");
+  document.getElementById("connectedTab");
+  document.getElementById("uptime");
   if (wsUrlInput) {
     wsUrlInput.value = "ws://localhost:8084";
   }
 }
 function setupEventListeners() {
   if (connectButton) {
-    connectButton.addEventListener("click", toggleConnection);
+    connectButton.addEventListener("click", connect);
+  }
+  if (disconnectButton) {
+    disconnectButton.addEventListener("click", disconnect);
   }
   if (wsUrlInput) {
     wsUrlInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
-        toggleConnection();
+        connect();
       }
     });
   }
@@ -89,8 +101,9 @@ async function connect() {
       throw new Error(connectTabResponse.error || "Échec de connexion à l'onglet");
     }
     currentTabId = activeTab.id;
+    connectionStartTime = /* @__PURE__ */ new Date();
     updateStatus("Connecté - MCP Ready", "connected");
-    setButtonState("connected");
+    showConnectedUI(activeTab);
     await updateConnectionStatus();
     displayTabs(tabs, activeTab.id);
   } catch (error) {
@@ -101,13 +114,13 @@ async function connect() {
 }
 async function disconnect() {
   updateStatus("Déconnexion...", "connecting");
-  setButtonState("disconnecting");
   try {
     const response = await sendMessage({ type: "disconnect" });
     if (response.success) {
       currentTabId = null;
+      connectionStartTime = null;
       updateStatus("Déconnecté", "disconnected");
-      setButtonState("disconnected");
+      showDisconnectedUI();
       hideTabsList();
     } else {
       throw new Error(response.error || "Échec de déconnexion");
@@ -115,38 +128,41 @@ async function disconnect() {
   } catch (error) {
     console.error("Disconnect error:", error);
     updateStatus(`Erreur: ${error.message}`, "error");
-    setButtonState("connected");
   }
 }
 async function checkConnectionStatus() {
   try {
     const response = await sendMessage({ type: "getConnectionStatus" });
-    if (response.success) {
+    if (response.success && response.data) {
       const status = response.data;
       connectionStatus = {
         ...status,
         lastChecked: /* @__PURE__ */ new Date()
       };
-      if (status.isConnected) {
+      if (status.isConnected && status.connectedTabId) {
         currentTabId = status.connectedTabId;
         updateStatus("Connecté - MCP Ready", "connected");
-        setButtonState("connected");
         const tabsResponse = await sendMessage({ type: "getTabs" });
         if (tabsResponse.success) {
           const tabs = tabsResponse.data || [];
-          if (Array.isArray(tabs)) {
+          if (Array.isArray(tabs) && tabs.length > 0) {
+            const connectedTab = tabs.find((t) => t.id === status.connectedTabId) || tabs[0];
+            showConnectedUI(connectedTab);
             displayTabs(tabs, status.connectedTabId);
           }
         }
       } else {
         updateStatus("Déconnecté", "disconnected");
-        setButtonState("disconnected");
+        showDisconnectedUI();
       }
+    } else {
+      updateStatus("Déconnecté", "disconnected");
+      showDisconnectedUI();
     }
   } catch (error) {
     console.error("Status check error:", error);
-    updateStatus("Erreur de vérification du statut", "error");
-    setButtonState("disconnected");
+    updateStatus("Déconnecté", "disconnected");
+    showDisconnectedUI();
   }
 }
 function setButtonState(state) {
@@ -233,6 +249,14 @@ function hideTabsList() {
   if (tabsList) {
     tabsList.style.display = "none";
   }
+}
+function showConnectedUI(tab) {
+  if (connectionSection) connectionSection.style.display = "none";
+  if (connectedInfoSection) connectedInfoSection.style.display = "block";
+}
+function showDisconnectedUI() {
+  if (connectionSection) connectionSection.style.display = "block";
+  if (connectedInfoSection) connectedInfoSection.style.display = "none";
 }
 function sendMessage(message) {
   return new Promise((resolve) => {
