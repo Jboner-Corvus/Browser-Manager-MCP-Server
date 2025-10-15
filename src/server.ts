@@ -10,6 +10,7 @@ import type { IncomingMessage } from 'http';
 
 import { FastMCP } from 'fastmcp';
 import type { FastMCPSession, LoggingLevel } from 'fastmcp';
+import { WebSocketServer } from 'ws';
 
 // Imports locaux
 import { config } from './config.js';
@@ -35,6 +36,13 @@ import {
   listExternalBrowserTabsTool,
   browserSnapshotTool,
 } from './tools/browserTools.js';
+import { pdfTools } from './tools/pdfTools.js';
+import { visionTools } from './tools/visionTools.js';
+import {
+  CapabilityManager,
+  createCapabilityManagerFromArgs,
+  Capability,
+} from './capabilities/index.js';
 import type { AuthData } from './types.js';
 import { getErrDetails } from './utils/errorUtils.js';
 
@@ -69,12 +77,26 @@ export const authHandler = async (req: IncomingMessage): Promise<AuthData> => {
 // =============================================================================
 export async function applicationEntryPoint() {
   logger.info(`Démarrage du serveur en mode ${config.NODE_ENV}...`);
+
+  // Initialiser le gestionnaire de capacités
+  const capabilityManager = new CapabilityManager();
+
+  // Parser les arguments de ligne de commande pour les capacités
+  const processArgs = process.argv.slice(2);
+  const requestedCapabilities = createCapabilityManagerFromArgs(processArgs);
+
+  // Utiliser le gestionnaire de capacités avec les arguments
+  const activeCapabilityManager =
+    requestedCapabilities.getEnabledCapabilities().length > 0
+      ? requestedCapabilities
+      : capabilityManager;
+
   const server = new FastMCP<AuthData>({
     name: 'MCP-Server-Production',
-    version: '2.0.0',
+    version: '2.1.0',
     authenticate: authHandler,
     instructions:
-      "Serveur MCP pour opérations synchrones et asynchrones. Le transport est HTTP Stream. L'authentification Bearer est requise.",
+      "Serveur MCP amélioré avec catégories d'outils et capacités modulaires. Support PDF, Vision, Performance, Réseau. Transport HTTP Stream.",
 
     health: {
       enabled: true,
@@ -92,28 +114,9 @@ export async function applicationEntryPoint() {
       enabled: false,
     },
   });
-  // Enregistrement des outils
-  server.addTool(launchBrowserTool);
-  server.addTool(listBrowsersTool);
-  server.addTool(detectOpenBrowsersTool);
-  server.addTool(connectExternalBrowserTool);
-  server.addTool(closeBrowserTool);
-  server.addTool(listTabsTool);
-  server.addTool(selectTabTool);
-  server.addTool(newTabTool);
-  server.addTool(closeTabTool);
-  server.addTool(navigateTool);
-  server.addTool(screenshotTool);
-  server.addTool(clickTool);
-  server.addTool(typeTextTool);
-  server.addTool(waitForTool);
-  server.addTool(getHtmlTool);
-  server.addTool(getConsoleLogsTool);
-  server.addTool(evaluateScriptTool);
-  server.addTool(listExternalBrowserTabsTool);
-  server.addTool(browserSnapshotTool);
 
-  const allTools = [
+  // Enregistrement des outils de base
+  const baseTools = [
     launchBrowserTool,
     listBrowsersTool,
     detectOpenBrowsersTool,
@@ -135,6 +138,31 @@ export async function applicationEntryPoint() {
     browserSnapshotTool,
   ];
 
+  // Ajouter les outils de base
+  baseTools.forEach((tool) => server.addTool(tool));
+
+  // Ajouter les outils des capacités activées
+  const enabledTools = [...baseTools];
+
+  // Capacité PDF
+  if (activeCapabilityManager.isCapabilityEnabled(Capability.PDF)) {
+    pdfTools.forEach((tool) => {
+      // Type assertion pour éviter les erreurs de compatibilité de types
+      server.addTool(tool as any);
+    });
+    enabledTools.push(...pdfTools);
+    logger.info('Capacité PDF activée - Outils PDF enregistrés');
+  }
+
+  // Capacité Vision
+  if (activeCapabilityManager.isCapabilityEnabled(Capability.VISION)) {
+    visionTools.forEach((tool) => server.addTool(tool));
+    enabledTools.push(...visionTools);
+    logger.info('Capacité Vision activée - Outils de vision enregistrés');
+  }
+
+  const allTools = enabledTools;
+
   logger.info(
     {
       tools: allTools.map((t) => t.name),
@@ -148,6 +176,72 @@ export async function applicationEntryPoint() {
   server.on('disconnect', (event: { session: FastMCPSession<AuthData>; reason?: string }) => {
     logger.warn({ reason: event.reason || 'Non spécifiée' }, 'Session client déconnectée.');
   });
+  // Démarrer le serveur WebSocket pour la communication avec l'extension
+  const wss = new WebSocketServer({ port: 8084 });
+
+  wss.on('connection', (ws: any) => {
+    logger.info('🔗 Extension connectée au WebSocket relay');
+
+    ws.on('message', async (message: any) => {
+      try {
+        const data = JSON.parse(message.toString());
+        logger.debug({ data }, "Message reçu de l'extension");
+
+        // Router les commandes CDP vers Brave
+        if (data.method === 'forwardCDPCommand') {
+          try {
+            const response = await fetch(
+              `http://localhost:9222${data.params.sessionId || ''}/cmd/${data.params.method}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data.params.params || {}),
+              }
+            );
+            const result = await response.json();
+            ws.send(JSON.stringify({ id: data.id, result }));
+          } catch (error) {
+            logger.error({ err: getErrDetails(error) }, 'Erreur lors du transfert CDP');
+            ws.send(JSON.stringify({ id: data.id, error: (error as Error).message }));
+          }
+        } else if (data.method === 'attachToTab') {
+          // Lister les onglets disponibles
+          try {
+            const tabsResponse = await fetch('http://localhost:9222/json/list');
+            const tabs = await tabsResponse.json();
+            ws.send(
+              JSON.stringify({
+                id: data.id,
+                result: {
+                  targetInfo: tabs[0] || null,
+                  allTabs: tabs,
+                },
+              })
+            );
+          } catch (error) {
+            logger.error(
+              { err: getErrDetails(error) },
+              'Erreur lors de la récupération des onglets'
+            );
+            ws.send(JSON.stringify({ id: data.id, error: (error as Error).message }));
+          }
+        }
+      } catch (error) {
+        logger.error({ err: getErrDetails(error) }, 'Erreur de traitement du message WebSocket');
+      }
+    });
+
+    ws.on('close', () => {
+      logger.info('Extension déconnectée du WebSocket relay');
+    });
+
+    ws.on('error', (error: any) => {
+      logger.error({ err: getErrDetails(error) }, 'Erreur WebSocket');
+    });
+  });
+
+  logger.info('🌐 WebSocket relay démarré sur ws://localhost:8084');
+
   try {
     // FORCER HTTP Stream comme mode par défaut absolu
     // Mode HTTP Stream (défaut) - supporte SSE et stdio
@@ -160,6 +254,9 @@ export async function applicationEntryPoint() {
     });
     logger.info(
       `🚀 Serveur FastMCP démarré en mode HTTP Stream par défaut sur http://localhost:${config.PORT}/mcp (SSE: /sse)`
+    );
+    logger.info(
+      `📡 Extension Brave: connectez-vous à ws://localhost:8084 pour la communication CDP`
     );
   } catch (error) {
     logger.fatal({ err: getErrDetails(error) }, 'Échec critique lors du démarrage du serveur.');

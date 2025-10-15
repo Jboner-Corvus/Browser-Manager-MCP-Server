@@ -13,7 +13,19 @@ const __dirname = path.dirname(__filename);
 
 // Charger les variables d'environnement depuis le fichier .env à la racine du projet, sauf en mode test
 if (process.env.NODE_ENV !== 'test') {
-  dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+  // Essayer d'abord le répertoire du projet, puis le répertoire de l'utilisateur
+  const projectEnvPath = path.resolve(__dirname, '..', '.env');
+  const userEnvPath = path.resolve(process.cwd(), '.env');
+
+  // Charger depuis le répertoire du projet si disponible, sinon depuis le répertoire utilisateur
+  if (require('fs').existsSync(projectEnvPath)) {
+    dotenv.config({ path: projectEnvPath });
+  } else if (require('fs').existsSync(userEnvPath)) {
+    dotenv.config({ path: userEnvPath });
+  } else {
+    // Pas de fichier .env trouvé, utiliser les valeurs par défaut
+    console.log('ℹ️ Aucun fichier .env trouvé, utilisation des valeurs par défaut.');
+  }
 }
 
 const envSchema = z.object({
@@ -21,7 +33,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8081),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   HTTP_STREAM_ENDPOINT: z.string().startsWith('/').default('/mcp'),
-  AUTH_TOKEN: z.string().min(16, 'AUTH_TOKEN doit comporter au moins 16 caractères.'),
+  AUTH_TOKEN: z.string().optional().default('browser-manager-mcp-server-default-token-2024'),
   REQUIRE_AUTH: z.coerce.boolean().default(false),
   HEALTH_CHECK_PATH: z
     .string()
@@ -50,15 +62,13 @@ export const config = parsedEnv.data;
 if (
   config.NODE_ENV === 'production' &&
   (!config.AUTH_TOKEN ||
-    config.AUTH_TOKEN === 'YOUR_STRONG_SECRET_TOKEN_HERE_CHANGE_ME' ||
-    config.AUTH_TOKEN === 'CHANGE_THIS_STRONG_SECRET_TOKEN' ||
+    config.AUTH_TOKEN === 'browser-manager-mcp-server-default-token-2024' ||
     config.AUTH_TOKEN.length < 16)
 ) {
-  console.error(
-    'ERREUR CRITIQUE DE SÉCURITÉ : AUTH_TOKEN est manquant, trop court, ou utilise une valeur par défaut en environnement de PRODUCTION.'
+  console.warn(
+    'ATTENTION : AUTH_TOKEN utilise une valeur par défaut en environnement de PRODUCTION.'
   );
-  console.error(
-    'Veuillez définir un AUTH_TOKEN fort et unique dans votre fichier .env pour la production.'
+  console.warn(
+    'Pour une sécurité optimale, définissez un AUTH_TOKEN personnalisé dans votre fichier .env.'
   );
-  process.exit(1);
 }

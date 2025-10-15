@@ -4,6 +4,9 @@
   "description": "Browser Manager MCP Server - Production Build",
   "main": "lib/server.js",
   "type": "module",
+  "bin": {
+    "browser-manager-mcp-server": "server.js"
+  },
   "scripts": {
     "start": "node server.js"
   },

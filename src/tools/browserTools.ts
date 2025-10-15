@@ -13,16 +13,22 @@ import {
 } from 'playwright';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { existsSync } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 const execAsync = promisify(exec);
 import type { AuthData } from '../types.js';
 
 // Global state
-const browsers = new Map<string, Browser>();
-const contexts = new Map<string, BrowserContext>();
-const pages = new Map<string, Page>();
-const consoleLogs = new Map<string, Array<{ type: string; text: string; timestamp: number }>>();
-let currentContextId: string | null = null;
-let currentPageId: string | null = null;
+export const browsers = new Map<string, Browser>();
+export const contexts = new Map<string, BrowserContext | BrowserContext[]>();
+export const pages = new Map<string, Page>();
+export const consoleLogs = new Map<
+  string,
+  Array<{ type: string; text: string; timestamp: number }>
+>();
+export let currentContextId: string | null = null;
+export let currentPageId: string | null = null;
 
 // Tool: launch_browser_with_auto_port
 export const launchBrowserWithAutoPortTool = {
@@ -35,7 +41,7 @@ export const launchBrowserWithAutoPortTool = {
       .default(false)
       .describe('Exécuter le navigateur en mode headless'),
     browser: z
-      .enum(['chromium', 'firefox', 'webkit', 'brave'])
+      .enum(['chromium', 'firefox', 'webkit', 'brave', 'chrome', 'comet'])
       .optional()
       .default('brave')
       .describe('Type de navigateur'),
@@ -45,7 +51,7 @@ export const launchBrowserWithAutoPortTool = {
       .default(9222)
       .describe('Port de départ pour la recherche de port disponible'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     try {
       const { headless, browser: browserType, startPort } = args;
@@ -58,34 +64,754 @@ export const launchBrowserWithAutoPortTool = {
         headless,
         args: [
           `--remote-debugging-port=${debugPort}`,
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-        ],
-      };
-
-      // Configuration spécifique pour Chromium/Chrome/Brave
-      if (browserType === 'chromium' || browserType === 'brave') {
-        launchOptions.args.push(
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
           '--no-first-run',
-          '--disable-gpu',
+          '--disable-features=VizDisplayCompositor',
           '--disable-background-timer-throttling',
           '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding'
+          '--disable-renderer-backgrounding',
+        ],
+        // Utiliser un profil temporaire par défaut pour éviter les conflits
+        userDataDir: path.join(os.tmpdir(), `playwright_${browserType}_profile_${Date.now()}`),
+      };
+
+      // Configuration spécifique pour Chromium/Chrome/Brave/Comet
+      if (
+        browserType === 'chromium' ||
+        browserType === 'brave' ||
+        browserType === 'chrome' ||
+        browserType === 'comet'
+      ) {
+        launchOptions.args.push(
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-ipc-flooding-protection',
+          '--disable-hang-monitor',
+          '--disable-prompt-on-repost',
+          '--force-renderer-accessibility',
+          '--disable-web-security'
         );
       }
 
-      const browser = await (
-        browserType === 'chromium' || browserType === 'brave'
-          ? chromium
-          : browserType === 'firefox'
-            ? firefox
-            : webkit
-      ).launch(launchOptions);
-      const context = await browser.newContext();
+      let browserLauncher;
+      if (browserType === 'chromium') {
+        browserLauncher = chromium;
+      } else if (browserType === 'brave') {
+        // Vérifier plusieurs chemins possibles pour Brave AVANT de configurer le launcher
+        const possiblePaths = [
+          'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+          'C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+          'C:\\Program Files\\BraveSoftware\\Brave-Browser\\brave.exe',
+          'C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\brave.exe',
+        ];
+
+        // Essayer de trouver Brave dans les chemins possibles
+        let braveFound = false;
+        let bravePath = '';
+
+        for (const path of possiblePaths) {
+          try {
+            console.log(`Vérification du chemin Brave: ${path}`);
+            if (existsSync(path)) {
+              console.log(`Brave trouvé à: ${path}`);
+              bravePath = path;
+              braveFound = true;
+              break;
+            } else {
+              console.log(`Brave non trouvé à: ${path}`);
+            }
+          } catch (error) {
+            console.warn(`Erreur lors de la vérification du chemin ${path}:`, error);
+            // Continuer avec le chemin suivant si celui-ci échoue
+          }
+        }
+
+        // Si Brave n'est toujours pas trouvé, essayer une recherche automatique
+        if (!braveFound) {
+          try {
+            console.log('Tentative de recherche automatique de Brave...');
+            // Recherche dans Program Files
+            const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
+            const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+
+            const searchPaths = [
+              `${programFiles}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+              `${programFilesX86}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+              `${programFiles}\\BraveSoftware\\Brave-Browser\\brave.exe`,
+              `${programFilesX86}\\BraveSoftware\\Brave-Browser\\brave.exe`,
+            ];
+
+            for (const path of searchPaths) {
+              if (existsSync(path)) {
+                console.log(`Brave trouvé automatiquement à: ${path}`);
+                bravePath = path;
+                braveFound = true;
+                break;
+              }
+            }
+          } catch (error) {
+            console.warn('Erreur lors de la recherche automatique:', error);
+          }
+        }
+
+        // Si Brave n'est toujours pas trouvé, lancer une erreur explicite
+        if (!braveFound) {
+          const errorMsg =
+            "Brave Browser n'est pas trouvé. Chemins vérifiés:\n" +
+            possiblePaths.map((p) => `- ${p}`).join('\n') +
+            '\n\n' +
+            'Veuillez vérifier que Brave est installé ou utilisez browser: "chromium" pour le navigateur open-source.';
+          console.error(errorMsg);
+          throw new Error(errorMsg);
+        }
+
+        console.log(`Utilisation de Brave à: ${bravePath}`);
+        // Utiliser chromium launcher avec le chemin Brave spécifique
+        // Cela va lancer Brave.exe en utilisant l'API Chromium de Playwright
+        browserLauncher = chromium;
+        launchOptions.executablePath = bravePath;
+      } else if (browserType === 'comet') {
+        // Configuration spécifique pour Comet (Perplexity)
+        const possiblePaths = [
+          'C:\\Users\\Deamon\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe',
+        ];
+
+        // Essayer de trouver Comet dans les chemins possibles
+        let cometFound = false;
+        let cometPath = '';
+
+        for (const path of possiblePaths) {
+          try {
+            if (existsSync(path)) {
+              cometPath = path;
+              cometFound = true;
+              break;
+            }
+          } catch {
+            // Continuer avec le chemin suivant si celui-ci échoue
+          }
+        }
+
+        // Si Comet n'est pas trouvé, lancer une erreur explicite
+        if (!cometFound) {
+          throw new Error(
+            "Perplexity Comet n'est pas trouvé. Veuillez vérifier que Comet est installé à l'emplacement:\n" +
+              '- C:\\Users\\Deamon\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe\n\n' +
+              'Ou utilisez browser: "chromium" pour le navigateur open-source.'
+          );
+        }
+
+        console.log(`Utilisation de Comet à: ${cometPath}`);
+
+        // Pour Comet, utiliser l'approche de lancement direct comme Brave
+        console.log('Lancement direct de Comet avec launchOptions...');
+        const { spawn } = await import('child_process');
+        const cometProcess = spawn(
+          cometPath,
+          [
+            `--user-data-dir=${launchOptions.userDataDir}`,
+            `--remote-debugging-port=${debugPort}`,
+            '--no-first-run',
+            ...launchOptions.args.filter((arg: string) => !arg.includes('--remote-debugging-port=') && !arg.includes('--user-data-dir'))
+          ],
+          {
+            detached: true,
+            stdio: 'ignore',
+          }
+        );
+
+        // Détacher le processus pour qu'il continue à tourner
+        cometProcess.unref();
+
+        console.log('Comet lancé directement avec spawn');
+
+        // Attendre un peu que Comet démarre
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        // Maintenant essayer de se connecter via CDP
+        try {
+          const browser = await chromium.connect(`ws://localhost:${debugPort}`);
+          const browserContexts = browser.contexts();
+          const context = browserContexts[0] || (await browser.newContext());
+          const page = context.pages()[0] || (await context.newPage());
+
+          const browserId = `browser_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const contextId = `context_${browserId}`;
+          const pageId = `page_${contextId}_0`;
+
+          browsers.set(browserId, browser);
+          contexts.set(contextId, context);
+          pages.set(pageId, page);
+
+          currentContextId = contextId;
+          currentPageId = pageId;
+
+          // Setup console logging
+          consoleLogs.set(pageId, []);
+          page.on('console', (msg: any) => {
+            const logs = consoleLogs.get(pageId) || [];
+            logs.push({
+              type: msg.type(),
+              text: msg.text(),
+              timestamp: Date.now(),
+            });
+            consoleLogs.set(pageId, logs);
+          });
+
+          // Gérer les erreurs de fermeture du navigateur
+          browser.on('disconnected', () => {
+            browsers.delete(browserId);
+            contexts.delete(contextId);
+            pages.delete(pageId);
+            consoleLogs.delete(pageId);
+            if (currentContextId === contextId) {
+              currentContextId = null;
+              currentPageId = null;
+            }
+          });
+
+          return `Navigateur Comet lancé avec succès ! ID: ${browserId}, Port de debugging: ${debugPort}, Contexte: ${contextId}, Page: ${pageId}`;
+        } catch (connectError) {
+          console.warn('Impossible de se connecter à Comet via CDP:', connectError);
+          // Retourner un message d'information même si la connexion CDP échoue
+          return `Comet lancé avec succès, mais connexion CDP non établie. Utilisez connect_external_browser pour vous connecter.`;
+        }
+      } else if (browserType === 'chrome') {
+        // Vérifier plusieurs chemins possibles pour Chrome AVANT de configurer le launcher
+        const possiblePaths = [
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        ];
+
+        // Essayer de trouver Chrome dans les chemins possibles
+        let chromeFound = false;
+        let chromePath = '';
+        for (const path of possiblePaths) {
+          try {
+            if (existsSync(path)) {
+              chromePath = path;
+              chromeFound = true;
+              break;
+            }
+          } catch {
+            // Continuer avec le chemin suivant si celui-ci échoue
+          }
+        }
+
+        // Si Chrome n'est pas trouvé, lancer une erreur explicite
+        if (!chromeFound) {
+          throw new Error(
+            "Google Chrome n'est pas trouvé. Veuillez vérifier que Chrome est installé dans un des emplacements suivants:\n" +
+              '- C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\n' +
+              '- C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe\n\n' +
+              'Ou utilisez browser: "chromium" pour le navigateur open-source.'
+          );
+        }
+
+        // Utiliser chromium launcher avec le chemin Chrome spécifique
+        // Cela va lancer chrome.exe en utilisant l'API Chromium de Playwright
+        browserLauncher = chromium;
+        launchOptions.executablePath = chromePath;
+      } else if (browserType === 'firefox') {
+        browserLauncher = firefox;
+      } else {
+        browserLauncher = webkit;
+      }
+
+      try {
+        let context: BrowserContext;
+        let browser: Browser;
+
+        // Pour les navigateurs Chromium-based avec userDataDir, utiliser launchPersistentContext
+        if (
+          browserType === 'chromium' ||
+          browserType === 'brave' ||
+          browserType === 'chrome' ||
+          browserType === 'comet'
+        ) {
+          context = await browserLauncher.launchPersistentContext(launchOptions);
+          const contextBrowser = context.browser();
+          if (!contextBrowser) {
+            throw new Error('Impossible de démarrer le navigateur');
+          }
+          browser = contextBrowser;
+        } else {
+          // Pour Firefox et WebKit, utiliser la méthode standard
+          browser = await browserLauncher.launch(launchOptions);
+          context = await browser.newContext();
+        }
+
+        const page = await context.newPage();
+
+        const browserId = `browser_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const contextId = `context_${browserId}`;
+        const pageId = `page_${contextId}_0`;
+
+        browsers.set(browserId, browser);
+        contexts.set(contextId, context);
+        pages.set(pageId, page);
+
+        currentContextId = contextId;
+        currentPageId = pageId;
+
+        // Setup console logging
+        consoleLogs.set(pageId, []);
+        page.on('console', (msg: any) => {
+          const logs = consoleLogs.get(pageId) || [];
+          logs.push({
+            type: msg.type(),
+            text: msg.text(),
+            timestamp: Date.now(),
+          });
+          consoleLogs.set(pageId, logs);
+        });
+
+        // Gérer les erreurs de fermeture du navigateur
+        browser.on('disconnected', () => {
+          browsers.delete(browserId);
+          contexts.delete(contextId);
+          pages.delete(pageId);
+          consoleLogs.delete(pageId);
+          if (currentContextId === contextId) {
+            currentContextId = null;
+            currentPageId = null;
+          }
+        });
+
+        return `Navigateur lancé avec succès ! ID: ${browserId}, Port de debugging: ${debugPort}, Contexte: ${contextId}, Page: ${pageId}`;
+      } catch (launchError) {
+        throw new Error(
+          `Erreur lors du lancement du navigateur: ${(launchError as Error).message}`
+        );
+      }
+    } catch (error) {
+      throw new Error(`Erreur lors du lancement du navigateur: ${(error as Error).message}`);
+    }
+  },
+};
+
+// Tool: launch_browser (original)
+export const launchBrowserTool = {
+  name: 'launch_browser',
+  description: 'Lance un nouveau navigateur',
+  parameters: z.object({
+    headless: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe('Exécuter le navigateur en mode headless'),
+    browser: z
+      .enum(['chromium', 'firefox', 'webkit', 'brave', 'chrome', 'comet'])
+      .optional()
+      .default('brave')
+      .describe('Type de navigateur'),
+    useDefaultProfile: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Utiliser le profil par défaut du navigateur au lieu d'un profil temporaire"),
+  }),
+
+  execute: async (args: any, _context: Context<AuthData>) => {
+    const { headless, browser: browserType, useDefaultProfile } = args;
+    console.log('Paramètres reçus:', { headless, browserType, useDefaultProfile });
+
+    // Configuration du débogage distant pour tous les navigateurs
+    const launchOptions: any = {
+      headless,
+      args: [
+        '--remote-debugging-port=9222',
+        '--no-first-run',
+        '--disable-features=VizDisplayCompositor',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+      ],
+    };
+
+    // Gestion du profil utilisateur
+    if (useDefaultProfile) {
+      console.log('Utilisation du profil par défaut du navigateur');
+      // Pour Brave et Comet, utiliser le profil par défaut de l'utilisateur
+      let userDataDir: string;
+      if (browserType === 'comet') {
+        userDataDir = path.join(
+          os.homedir(),
+          'AppData',
+          'Local',
+          'Perplexity',
+          'Comet',
+          'User Data'
+        );
+      } else {
+        userDataDir = path.join(
+          os.homedir(),
+          'AppData',
+          'Local',
+          'BraveSoftware',
+          'Brave-Browser',
+          'User Data'
+        );
+      }
+      launchOptions.userDataDir = userDataDir;
+      console.log(`Chemin du profil ${browserType}: ${userDataDir}`);
+      // Ajouter des arguments pour restaurer la session et ouvrir la page d'accueil
+      launchOptions.args.push('--restore-last-session');
+      // Ne pas spécifier d'URL pour laisser le navigateur ouvrir sa page d'accueil par défaut
+    } else {
+      console.log("Utilisation d'un profil temporaire");
+      // Utiliser un profil temporaire pour éviter les conflits
+      const tempDir = os.tmpdir();
+      const profileDir = path.join(tempDir, `playwright_${browserType}_profile_${Date.now()}`);
+      launchOptions.userDataDir = profileDir;
+    }
+
+    // Configuration spécifique pour Chromium/Chrome/Brave/Comet
+    if (
+      browserType === 'chromium' ||
+      browserType === 'brave' ||
+      browserType === 'chrome' ||
+      browserType === 'comet'
+    ) {
+      launchOptions.args.push(
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-ipc-flooding-protection',
+        '--disable-hang-monitor',
+        '--disable-prompt-on-repost',
+        '--force-renderer-accessibility',
+        '--disable-web-security'
+      );
+    }
+
+    let browserLauncher;
+    if (browserType === 'chromium') {
+      browserLauncher = chromium;
+    } else if (browserType === 'brave') {
+      // Pour Brave avec profil par défaut, utiliser une approche différente
+      if (useDefaultProfile) {
+        console.log('Lancement direct de Brave avec profil par défaut...');
+
+        // Lancer Brave directement avec les arguments appropriés
+        const bravePath = 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe';
+        const userDataDir = path.join(
+          os.homedir(),
+          'AppData',
+          'Local',
+          'BraveSoftware',
+          'Brave-Browser',
+          'User Data'
+        );
+
+        try {
+          // Lancer Brave directement
+          const { spawn } = await import('child_process');
+          const braveProcess = spawn(
+            bravePath,
+            [
+              `--user-data-dir=${userDataDir}`,
+              '--restore-last-session',
+              '--remote-debugging-port=9222',
+              '--no-first-run',
+            ],
+            {
+              detached: true,
+              stdio: 'ignore',
+            }
+          );
+
+          // Détacher le processus pour qu'il continue à tourner
+          braveProcess.unref();
+
+          console.log('Brave lancé directement avec profil par défaut');
+
+          // Attendre un peu que Brave démarre
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+
+          // Maintenant essayer de se connecter via CDP
+          try {
+            const browser = await chromium.connect(`ws://localhost:9222`);
+            const browserContexts = browser.contexts();
+            const context = browserContexts[0] || (await browser.newContext());
+            const page = context.pages()[0] || (await context.newPage());
+
+            const browserId = `browser_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const contextId = `context_${browserId}`;
+            const pageId = `page_${contextId}_0`;
+
+            browsers.set(browserId, browser);
+            contexts.set(contextId, context);
+            pages.set(pageId, page);
+
+            currentContextId = contextId;
+            currentPageId = pageId;
+
+            // Setup console logging
+            consoleLogs.set(pageId, []);
+            page.on('console', (msg: any) => {
+              const logs = consoleLogs.get(pageId) || [];
+              logs.push({
+                type: msg.type(),
+                text: msg.text(),
+                timestamp: Date.now(),
+              });
+              consoleLogs.set(pageId, logs);
+            });
+
+            return `Navigateur Brave lancé avec profil par défaut. ID: ${browserId}, Contexte: ${contextId}, Page: ${pageId}`;
+          } catch (connectError) {
+            console.warn('Impossible de se connecter à Brave via CDP:', connectError);
+            // Retourner un message d'information même si la connexion CDP échoue
+            return `Brave lancé avec succès avec profil par défaut, mais connexion CDP non établie. Utilisez connect_external_browser pour vous connecter.`;
+          }
+        } catch (launchError) {
+          console.error('Erreur lors du lancement direct de Brave:', launchError);
+          throw new Error(
+            `Erreur lors du lancement direct de Brave: ${(launchError as Error).message}`
+          );
+        }
+      } else {
+        // Pour Brave sans profil par défaut, utiliser Playwright normalement
+        // Vérifier plusieurs chemins possibles pour Brave AVANT de configurer le launcher
+        const possiblePaths = [
+          'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+          'C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+          'C:\\Program Files\\BraveSoftware\\Brave-Browser\\brave.exe',
+          'C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\brave.exe',
+        ];
+
+        // Essayer de trouver Brave dans les chemins possibles
+        let braveFound = false;
+        let bravePath = '';
+
+        console.log('Début de la recherche de Brave...');
+        console.log('Chemins possibles:', possiblePaths);
+
+        for (const path of possiblePaths) {
+          try {
+            console.log(`Vérification du chemin Brave: ${path}`);
+            const exists = existsSync(path);
+            console.log(`existsSync(${path}) = ${exists}`);
+            if (exists) {
+              console.log(`Brave trouvé à: ${path}`);
+              bravePath = path;
+              braveFound = true;
+              break;
+            } else {
+              console.log(`Brave non trouvé à: ${path}`);
+            }
+          } catch (error) {
+            console.warn(`Erreur lors de la vérification du chemin ${path}:`, error);
+            // Continuer avec le chemin suivant si celui-ci échoue
+          }
+        }
+
+        // Si Brave n'est toujours pas trouvé, essayer une recherche automatique
+        if (!braveFound) {
+          try {
+            console.log('Tentative de recherche automatique de Brave...');
+            // Recherche dans Program Files
+            const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
+            const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+
+            const searchPaths = [
+              `${programFiles}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+              `${programFilesX86}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+              `${programFiles}\\BraveSoftware\\Brave-Browser\\brave.exe`,
+              `${programFilesX86}\\BraveSoftware\\Brave-Browser\\brave.exe`,
+            ];
+
+            for (const path of searchPaths) {
+              if (existsSync(path)) {
+                console.log(`Brave trouvé automatiquement à: ${path}`);
+                bravePath = path;
+                braveFound = true;
+                break;
+              }
+            }
+          } catch (error) {
+            console.warn('Erreur lors de la recherche automatique:', error);
+          }
+        }
+
+        // Si Brave n'est toujours pas trouvé, lancer une erreur explicite
+        if (!braveFound) {
+          const errorMsg =
+            "Brave Browser n'est pas trouvé. Chemins vérifiés:\n" +
+            possiblePaths.map((p) => `- ${p}`).join('\n') +
+            '\n\n' +
+            'Veuillez vérifier que Brave est installé ou utilisez browser: "chromium" pour le navigateur open-source.';
+          console.error(errorMsg);
+          throw new Error(errorMsg);
+        }
+
+        console.log(`Utilisation de Brave à: ${bravePath}`);
+        // Utiliser chromium launcher avec le chemin Brave spécifique
+        // Cela va lancer Brave.exe en utilisant l'API Chromium de Playwright
+        browserLauncher = chromium;
+        launchOptions.executablePath = bravePath;
+      }
+    } else if (browserType === 'chrome') {
+      // Vérifier plusieurs chemins possibles pour Chrome AVANT de configurer le launcher
+      const possiblePaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      ];
+
+      // Essayer de trouver Chrome dans les chemins possibles
+      let chromeFound = false;
+      let chromePath = '';
+      for (const path of possiblePaths) {
+        try {
+          if (existsSync(path)) {
+            chromePath = path;
+            chromeFound = true;
+            break;
+          }
+        } catch {
+          // Continuer avec le chemin suivant si celui-ci échoue
+        }
+      }
+
+      // Si Chrome n'est pas trouvé, lancer une erreur explicite
+      if (!chromeFound) {
+        throw new Error(
+          "Google Chrome n'est pas trouvé. Veuillez vérifier que Chrome est installé dans un des emplacements suivants:\n" +
+            '- C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\n' +
+            '- C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe\n\n' +
+            'Ou utilisez browser: "chromium" pour le navigateur open-source.'
+        );
+      }
+
+      // Utiliser chromium launcher avec le chemin Chrome spécifique
+      // Cela va lancer chrome.exe en utilisant l'API Chromium de Playwright
+      browserLauncher = chromium;
+      launchOptions.executablePath = chromePath;
+    } else if (browserType === 'comet') {
+      // Configuration spécifique pour Comet (Perplexity)
+      const possiblePaths = [
+        'C:\\Users\\Deamon\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe',
+      ];
+
+      // Essayer de trouver Comet dans les chemins possibles
+      let cometFound = false;
+      let cometPath = '';
+
+      for (const path of possiblePaths) {
+        try {
+          if (existsSync(path)) {
+            cometPath = path;
+            cometFound = true;
+            break;
+          }
+        } catch {
+          // Continuer avec le chemin suivant si celui-ci échoue
+        }
+      }
+
+      // Si Comet n'est pas trouvé, lancer une erreur explicite
+      if (!cometFound) {
+        throw new Error(
+          "Perplexity Comet n'est pas trouvé. Veuillez vérifier que Comet est installé à l'emplacement:\n" +
+            '- C:\\Users\\Deamon\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe\n\n' +
+            'Ou utilisez browser: "chromium" pour le navigateur open-source.'
+        );
+      }
+
+      console.log(`Utilisation de Comet à: ${cometPath}`);
+      console.log('Type de cometPath:', typeof cometPath);
+      console.log('cometPath est une chaîne ?', typeof cometPath === 'string');
+      console.log('Options de lancement:', JSON.stringify(launchOptions, null, 2));
+
+      // Pour Comet, utiliser l'approche de lancement direct comme Brave
+      console.log('Lancement direct de Comet avec launchOptions...');
+      const { spawn } = await import('child_process');
+      const cometProcess = spawn(
+        cometPath,
+        [
+          `--user-data-dir=${launchOptions.userDataDir}`,
+          '--remote-debugging-port=9222',
+          '--no-first-run',
+          ...launchOptions.args.filter((arg: string) => !arg.includes('--remote-debugging-port=') && !arg.includes('--user-data-dir'))
+        ],
+        {
+          detached: true,
+          stdio: 'ignore',
+        }
+      );
+
+      // Détacher le processus pour qu'il continue à tourner
+      cometProcess.unref();
+
+      console.log('Comet lancé directement avec spawn');
+
+      // Attendre un peu que Comet démarre
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // Maintenant essayer de se connecter via CDP
+      try {
+        const browser = await chromium.connect('ws://localhost:9222');
+        const browserContexts = browser.contexts();
+        const context = browserContexts[0] || (await browser.newContext());
+        const page = context.pages()[0] || (await context.newPage());
+
+        const browserId = `browser_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const contextId = `context_${browserId}`;
+        const pageId = `page_${contextId}_0`;
+
+        browsers.set(browserId, browser);
+        contexts.set(contextId, context);
+        pages.set(pageId, page);
+
+        currentContextId = contextId;
+        currentPageId = pageId;
+
+        // Setup console logging
+        consoleLogs.set(pageId, []);
+        page.on('console', (msg: any) => {
+          const logs = consoleLogs.get(pageId) || [];
+          logs.push({
+            type: msg.type(),
+            text: msg.text(),
+            timestamp: Date.now(),
+          });
+          consoleLogs.set(pageId, logs);
+        });
+
+        return `Navigateur Comet lancé avec succès. ID: ${browserId}, Contexte: ${contextId}, Page: ${pageId}`;
+      } catch (connectError) {
+        console.warn('Impossible de se connecter à Comet via CDP:', connectError);
+        // Retourner un message d'information même si la connexion CDP échoue
+        return `Comet lancé avec succès, mais connexion CDP non établie. Utilisez connect_external_browser pour vous connecter.`;
+      }
+    } else if (browserType === 'firefox') {
+      browserLauncher = firefox;
+    } else {
+      browserLauncher = webkit;
+    }
+
+    try {
+      let context: BrowserContext;
+      let browser: Browser;
+
+      // Pour les navigateurs Chromium-based avec userDataDir, utiliser launchPersistentContext
+      if (
+        browserType === 'chromium' ||
+        browserType === 'brave' ||
+        browserType === 'chrome' ||
+        browserType === 'comet'
+      ) {
+        context = await browserLauncher.launchPersistentContext(launchOptions);
+        const contextBrowser = context.browser();
+        if (!contextBrowser) {
+          throw new Error('Impossible de démarrer le navigateur');
+        }
+        browser = contextBrowser;
+      } else {
+        // Pour Firefox et WebKit, utiliser la méthode standard
+        browser = await browserLauncher.launch(launchOptions);
+        context = await browser.newContext();
+      }
+
       const page = await context.newPage();
 
       const browserId = `browser_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -111,92 +837,22 @@ export const launchBrowserWithAutoPortTool = {
         consoleLogs.set(pageId, logs);
       });
 
-      return `Navigateur lancé avec succès ! ID: ${browserId}, Port de debugging: ${debugPort}, Contexte: ${contextId}, Page: ${pageId}`;
-    } catch (error) {
-      throw new Error(`Erreur lors du lancement du navigateur: ${(error as Error).message}`);
-    }
-  },
-};
-
-// Tool: launch_browser (original)
-export const launchBrowserTool = {
-  name: 'launch_browser',
-  description: 'Lance un nouveau navigateur',
-  parameters: z.object({
-    headless: z
-      .boolean()
-      .optional()
-      .default(true)
-      .describe('Exécuter le navigateur en mode headless'),
-    browser: z
-      .enum(['chromium', 'firefox', 'webkit', 'brave'])
-      .optional()
-      .default('brave')
-      .describe('Type de navigateur'),
-  }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  execute: async (args: any, _context: Context<AuthData>) => {
-    const { headless, browser: browserType } = args;
-
-    // Configuration du débogage distant pour tous les navigateurs
-    const launchOptions: any = {
-      headless,
-      args: [
-        '--remote-debugging-port=9222',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
-      ],
-    };
-
-    // Configuration spécifique pour Chromium/Chrome/Brave
-    if (browserType === 'chromium' || browserType === 'brave') {
-      launchOptions.args.push(
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--disable-gpu',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding'
-      );
-    }
-
-    const browser = await (
-      browserType === 'chromium' || browserType === 'brave'
-        ? chromium
-        : browserType === 'firefox'
-          ? firefox
-          : webkit
-    ).launch(launchOptions);
-    const context = await browser.newContext();
-    const page = await context.newPage();
-
-    const browserId = `browser_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const contextId = `context_${browserId}`;
-    const pageId = `page_${contextId}_0`;
-
-    browsers.set(browserId, browser);
-    contexts.set(contextId, context);
-    pages.set(pageId, page);
-
-    currentContextId = contextId;
-    currentPageId = pageId;
-
-    // Setup console logging
-    consoleLogs.set(pageId, []);
-    page.on('console', (msg: any) => {
-      const logs = consoleLogs.get(pageId) || [];
-      logs.push({
-        type: msg.type(),
-        text: msg.text(),
-        timestamp: Date.now(),
+      // Gérer les erreurs de fermeture du navigateur
+      browser.on('disconnected', () => {
+        browsers.delete(browserId);
+        contexts.delete(contextId);
+        pages.delete(pageId);
+        consoleLogs.delete(pageId);
+        if (currentContextId === contextId) {
+          currentContextId = null;
+          currentPageId = null;
+        }
       });
-      consoleLogs.set(pageId, logs);
-    });
 
-    return `Navigateur lancé. ID: ${browserId}, Contexte: ${contextId}, Page: ${pageId}`;
+      return `Navigateur lancé. ID: ${browserId}, Contexte: ${contextId}, Page: ${pageId}`;
+    } catch (launchError) {
+      throw new Error(`Erreur lors du lancement du navigateur: ${(launchError as Error).message}`);
+    }
   },
 };
 
@@ -221,6 +877,7 @@ export const listBrowsersTool = {
         'brave.exe',
         'msedge.exe',
         'firefox.exe',
+        'comet.exe',
       ];
 
       for (const browser of browserProcesses) {
@@ -237,29 +894,11 @@ export const listBrowsersTool = {
                 const pid = parts[1].replace(/"/g, '');
                 const type = getBrowserType(name);
 
-                // Try to get tabs for this browser
-                let tabs = [];
-                try {
-                  const debugPorts = [9222, 9223, 9224, 9225, 9226, 9227, 9228, 9229, 9230];
-                  for (const port of debugPorts) {
-                    try {
-                      const response = await fetch(`http://localhost:${port}/json/list`);
-                      if (response.ok) {
-                        const tabData = await response.json();
-                        tabs = tabData.map((tab: any) => ({
-                          id: tab.id,
-                          url: tab.url,
-                          title: tab.title,
-                        }));
-                        break;
-                      }
-                    } catch {
-                      continue;
-                    }
-                  }
-                } catch {
-                  // No tabs available
-                }
+                // For browsers without debugging enabled, don't try to fetch tabs
+                // This avoids "fetch failed" errors and improves performance
+                let tabs: Array<{ id: string; url: string; title: string }> = [];
+                // Note: tabs will be empty for browsers without remote debugging enabled
+                // Users should use the extension to connect to such browsers
 
                 externalBrowsers.push({
                   id: `${type}_${pid}`,
@@ -276,7 +915,7 @@ export const listBrowsersTool = {
           continue;
         }
       }
-    } catch (error) {
+    } catch {
       // Ignore errors in external browser detection
     }
 
@@ -356,84 +995,90 @@ async function findAvailableDebugPort(startPort: number = 9222): Promise<number>
 // Tool: connect_external_browser
 export const connectExternalBrowserTool = {
   name: 'connect_external_browser',
-  description: 'Se connecte à un navigateur externe en mode debug pour le contrôler',
+  description: 'Connecte le serveur MCP à un navigateur externe via WebSocket relay',
   parameters: z.object({
-    browserId: z.string().describe('ID du navigateur externe (ex: "Google Chrome_1234")'),
-    debugPort: z
-      .number()
+    browserId: z.string().describe('ID du navigateur externe (ex: "Brave Browser_1234")'),
+    autoConnect: z
+      .boolean()
       .optional()
-      .default(9222)
-      .describe('Port de debugging distant (optionnel, auto-détection si non spécifié)'),
+      .default(true)
+      .describe('Tenter une connexion automatique via le WebSocket relay'),
   }),
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { browserId, debugPort } = args;
+    const { browserId, autoConnect } = args;
 
     try {
-      // Trouver un port disponible si non spécifié ou si le port spécifié est occupé
-      let portToUse = debugPort;
-      if (debugPort === 9222) {
-        portToUse = await findAvailableDebugPort(9222);
-        if (portToUse !== 9222) {
-          console.log(`Port 9222 occupé, utilisation du port ${portToUse} à la place`);
-        }
+      // Vérifier si Brave est en cours d'exécution avec debugging distant
+      const debugResponse = await fetch('http://localhost:9222/json/list');
+      if (!debugResponse.ok) {
+        throw new Error("Brave n'est pas accessible sur le port de debugging 9222");
       }
 
-      // Essayer de se connecter au navigateur externe via CDP avec retry
-      let browser;
-      const maxRetries = 3;
-      let connected = false;
+      const tabs = await debugResponse.json();
 
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      if (autoConnect) {
+        // Vérifier si le WebSocket relay est actif
         try {
-          browser = await chromium.connect(`ws://localhost:${portToUse}`);
-          connected = true;
-          break;
-        } catch (error) {
-          if (attempt === maxRetries) {
-            throw error;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+          const wsResponse = await fetch('http://localhost:8082', {
+            method: 'HEAD',
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (wsResponse.ok) {
+            return (
+              `✅ **Connexion établie via WebSocket relay**\n\n` +
+              `📍 Navigateur détecté: ${browserId}\n` +
+              `🔗 WebSocket relay: ws://localhost:8082\n` +
+              `🌐 Debugging Brave: http://localhost:9222\n` +
+              `📑 Onglets disponibles: ${tabs.length}\n\n` +
+              `**Instructions pour l'extension:**\n` +
+              `1. Dans Brave, cliquez sur l'icône "Browser Manager MCP Bridge"\n` +
+              `2. L'extension se connectera automatiquement à ws://localhost:8082\n` +
+              `3. Sélectionnez l'onglet à contrôler\n` +
+              `4. La communication CDP sera routée via le serveur MCP\n\n` +
+              `🎯 **Onglets détectés:**\n` +
+              tabs
+                .map((tab: any, i: number) => `${i + 1}. ${tab.title || 'Sans titre'} - ${tab.url}`)
+                .join('\n')
+            );
           }
-          // Attendre 1 seconde avant de réessayer
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+        } catch {
+          // WebSocket relay pas disponible, instructions manuelles
         }
       }
 
-      if (!connected || !browser) {
-        throw new Error(`Impossible de se connecter après ${maxRetries} tentatives`);
-      }
-
-      const context = browser.contexts()[0] || (await browser.newContext());
-      const contextPages = context.pages();
-      const page = contextPages[0] || (await context.newPage());
-
-      // Générer un ID unique pour ce navigateur connecté
-      const connectedBrowserId = `connected_${browserId}_${Date.now()}`;
-      const contextId = `context_${connectedBrowserId}`;
-      const pageId = `page_${contextId}_0`;
-
-      // Stocker les références
-      browsers.set(connectedBrowserId, browser);
-      contexts.set(contextId, context);
-      pages.set(pageId, page);
-
-      currentContextId = contextId;
-      currentPageId = pageId;
-
-      // Setup console logging
-      consoleLogs.set(pageId, []);
-      page.on('console', (msg: ConsoleMessage) => {
-        const logs = consoleLogs.get(pageId) || [];
-        logs.push({
-          type: msg.type(),
-          text: msg.text(),
-          timestamp: Date.now(),
-        });
-        consoleLogs.set(pageId, logs);
-      });
-
-      return `Connecté au navigateur externe ${browserId} sur le port ${portToUse}. ID de contrôle: ${connectedBrowserId}, Page active: ${pageId}`;
+      // Instructions manuelles si auto-connect échoue
+      return (
+        `🔗 **Configuration de connexion manuelle**\n\n` +
+        `📍 Navigateur: ${browserId}\n` +
+        `🌐 Debugging Brave: http://localhost:9222 (ACTIF)\n` +
+        `🔧 WebSocket relay: ws://localhost:8082 (à démarrer)\n\n` +
+        `**Étapes:**\n` +
+        `1. Redémarrez le serveur MCP pour activer le WebSocket relay\n` +
+        `2. Dans Brave, cliquez sur l'extension "Browser Manager MCP Bridge"\n` +
+        `3. Connectez-vous à ws://localhost:8082\n` +
+        `4. Sélectionnez un onglet parmi les ${tabs.length} disponibles\n\n` +
+        `🎯 **Onglets disponibles:**\n` +
+        tabs
+          .map((tab: any, i: number) => `${i + 1}. ${tab.title || 'Sans titre'} - ${tab.url}`)
+          .join('\n') +
+        `\n\n⚠️ **Note:** L'extension doit être installée dans Brave et le serveur MCP doit être en cours d'exécution.`
+      );
     } catch (error) {
-      throw new Error(
-        `Impossible de se connecter au navigateur ${browserId}: ${(error as Error).message}`
+      return (
+        `❌ **Erreur de connexion**\n\n` +
+        `Impossible de se connecter à ${browserId}.\n` +
+        `Erreur: ${(error as Error).message}\n\n` +
+        `**Solutions possibles:**\n` +
+        `1. Vérifiez que Brave est en cours d'exécution\n` +
+        `2. Lancez Brave avec: brave.exe --remote-debugging-port=9222\n` +
+        `3. Vérifiez que l'extension "Browser Manager MCP Bridge" est installée\n` +
+        `4. Assurez-vous que le serveur MCP tourne sur le port 8081\n` +
+        `5. Le WebSocket relay doit être actif sur le port 8082`
       );
     }
   },
@@ -444,7 +1089,7 @@ export const detectOpenBrowsersTool = {
   name: 'detect_open_browsers',
   description: 'Détecte les navigateurs ouverts sur le système',
   parameters: z.object({}),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (_args: any, _context: Context<AuthData>) => {
     try {
       // Liste des navigateurs à détecter
@@ -454,6 +1099,7 @@ export const detectOpenBrowsersTool = {
         'brave.exe',
         'msedge.exe',
         'firefox.exe',
+        'comet.exe',
         'iexplore.exe',
       ];
 
@@ -490,8 +1136,8 @@ export const detectOpenBrowsersTool = {
       }
 
       return JSON.stringify(allBrowsers, null, 2);
-    } catch (error) {
-      throw new Error(`Erreur lors de la détection des navigateurs: ${(error as Error).message}`);
+    } catch (detectError: any) {
+      throw new Error(`Erreur lors de la détection des navigateurs: ${detectError.message}`);
     }
   },
 };
@@ -504,6 +1150,7 @@ function getBrowserType(processName: string): string {
     'brave.exe': 'Brave Browser',
     'msedge.exe': 'Microsoft Edge',
     'firefox.exe': 'Mozilla Firefox',
+    'comet.exe': 'Perplexity Comet',
     'iexplore.exe': 'Internet Explorer',
   };
   return browserMap[processName] || processName;
@@ -516,7 +1163,7 @@ export const closeBrowserTool = {
   parameters: z.object({
     browserId: z.string().describe('ID du navigateur à fermer'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     const { browserId } = args;
     const browser = browsers.get(browserId);
@@ -558,7 +1205,7 @@ export const listTabsTool = {
       throw new Error('Aucun contexte actif');
     }
     const context = contexts.get(contextId)!;
-    const contextPages = context.pages();
+    const contextPages = Array.isArray(context) ? context[0].pages() : context.pages();
     const tabList = contextPages.map((p, i) => ({
       id: `page_${contextId}_${i}`,
       url: p.url(),
@@ -575,7 +1222,7 @@ export const selectTabTool = {
   parameters: z.object({
     pageId: z.string().describe('ID de la page à sélectionner'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     const { pageId } = args;
     const page = pages.get(pageId);
@@ -596,15 +1243,15 @@ export const newTabTool = {
     contextId: z.string().optional().describe('ID du contexte, par défaut le courant'),
   }),
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   execute: async (args: any, _context: Context<AuthData>) => {
     const { contextId = currentContextId } = args;
     if (!contextId || !contexts.has(contextId)) {
       throw new Error('Aucun contexte actif');
     }
     const context = contexts.get(contextId)!;
-    const page = await context.newPage();
-    const pageIndex = context.pages().length - 1;
+    const actualContext = Array.isArray(context) ? context[0] : context;
+    const page = await actualContext.newPage();
+    const pageIndex = actualContext.pages().length - 1;
     const pageId = `page_${contextId}_${pageIndex}`;
     pages.set(pageId, page);
 
@@ -656,7 +1303,7 @@ export const navigateTool = {
     url: z.string().describe('URL à visiter'),
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     const { url, pageId = currentPageId } = args;
     if (!pageId || !pages.has(pageId)) {
@@ -681,7 +1328,7 @@ export const screenshotTool = {
       .default('screenshot.png')
       .describe("Chemin relatif où sauvegarder la capture d'écran"),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     const { pageId = currentPageId, fullPage, path } = args;
     if (!pageId || !pages.has(pageId)) {
@@ -712,7 +1359,7 @@ export const clickTool = {
       .default(true)
       .describe('Attendre que le sélecteur soit disponible'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     const { selector, pageId = currentPageId, force, timeout, waitForSelector } = args;
     if (!pageId || !pages.has(pageId)) {
@@ -754,10 +1401,8 @@ export const clickTool = {
           }
         }, selector);
         return 'Cliqué avec succès (via JavaScript)';
-      } catch (jsError: any) {
-        throw new Error(
-          `Échec du clic: ${error.message}. Tentative JavaScript échouée: ${jsError.message}`
-        );
+      } catch {
+        throw new Error(`Échec du clic: ${error.message}. Tentative JavaScript échouée`);
       }
     }
   },
@@ -822,7 +1467,7 @@ export const typeTextTool = {
       .default(true)
       .describe('Attendre que le sélecteur soit disponible'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     const {
       selector,
@@ -849,7 +1494,7 @@ export const typeTextTool = {
           await page.waitForSelector(selector, { timeout: Math.min(timeout, 5000) });
           targetElement = await page.$(selector);
           foundStrategy = 'standard';
-        } catch (waitError: any) {
+        } catch {
           // Si l'attente échoue, essayer des stratégies alternatives
           foundStrategy = 'fallback';
         }
@@ -965,7 +1610,7 @@ export const typeTextTool = {
               await (targetElement as any).fill(text, { timeout: 10000 });
               return 'Texte tapé avec succès (fill)';
             }
-          } catch (fillError: any) {
+          } catch {
             // Si fill échoue, essayer type
           }
         }
@@ -1104,8 +1749,8 @@ export const typeTextTool = {
           `Échec de la saisie de texte: ${error.message} (stratégie: ${foundStrategy})`
         );
       }
-    } catch (error: any) {
-      throw new Error(`Échec de la saisie de texte: ${error.message}`);
+    } catch (launchError: any) {
+      throw new Error(`Erreur lors du lancement du navigateur: ${launchError.message}`);
     }
   },
 };
@@ -1122,7 +1767,7 @@ export const waitForTool = {
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
     hidden: z.boolean().optional().default(false).describe('Attendre même les éléments cachés'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
     const { text, selector, time, timeout, pageId = currentPageId, hidden } = args;
     if (!pageId || !pages.has(pageId)) {
@@ -1139,7 +1784,7 @@ export const waitForTool = {
             state: hidden ? 'attached' : 'visible',
           });
           return `Texte "${text}" trouvé avec succès`;
-        } catch (textError: any) {
+        } catch {
           // Stratégie de repli : chercher dans tout le document
           const found = await page.evaluate(
             ([searchText, isHidden]) => {
@@ -1167,7 +1812,7 @@ export const waitForTool = {
         try {
           await page.waitForSelector(selector, { timeout, state: hidden ? 'attached' : 'visible' });
           return `Sélecteur "${selector}" trouvé avec succès`;
-        } catch (selectorError: any) {
+        } catch {
           // Stratégie de repli : chercher avec des critères plus larges
           const found = await page.evaluate(
             ([sel, isHidden]) => {
@@ -1196,8 +1841,8 @@ export const waitForTool = {
       } else {
         throw new Error('Veuillez spécifier soit "text", soit "selector", soit "time"');
       }
-    } catch (error: any) {
-      throw new Error(`Erreur lors de l'attente: ${error.message}`);
+    } catch (_error: any) {
+      throw new Error(`Erreur lors de l'attente: ${_error.message}`);
     }
   },
 };
@@ -1219,9 +1864,9 @@ export const getHtmlTool = {
       .describe('Nombre maximum de caractères à retourner'),
     truncate: z.boolean().optional().default(true).describe('Tronquer le HTML si trop volumineux'),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { pageId = currentPageId, selector, maxChars, truncate } = args;
+    const { pageId = currentPageId, selector, maxChars } = args;
     if (!pageId || !pages.has(pageId)) {
       throw new Error('Aucune page active');
     }
@@ -1243,10 +1888,10 @@ export const getHtmlTool = {
       }
 
       // Limiter la taille de la réponse si nécessaire
-      if (html.length > maxChars && truncate) {
+      if (html.length > maxChars) {
         const truncatedHtml =
           html.substring(0, maxChars) +
-          '...\n\n[HTML tronqué - utilisez les paramètres maxChars ou truncate: false pour voir plus]';
+          '...\n\n[HTML tronqué - utilisez les paramètres maxChars pour voir plus]';
         return JSON.stringify(
           {
             html: truncatedHtml,
@@ -1269,8 +1914,8 @@ export const getHtmlTool = {
       };
 
       return JSON.stringify(result, null, 2);
-    } catch (error: any) {
-      throw new Error(`Erreur lors de la récupération du HTML: ${error.message}`);
+    } catch (htmlError: any) {
+      throw new Error(`Erreur lors de la récupération du HTML: ${htmlError.message}`);
     }
   },
 };
@@ -1291,7 +1936,7 @@ export const getConsoleLogsTool = {
     truncate: z.boolean().optional().default(true).describe('Tronquer les logs si trop volumineux'),
   }),
   execute: async (args: any, _context: Context<AuthData>) => {
-    const { pageId = currentPageId, maxLogs, level, since, search, truncate } = args;
+    const { pageId = currentPageId, maxLogs, level, since, search } = args;
     if (!pageId || !consoleLogs.has(pageId)) {
       throw new Error('Aucune page active ou pas de logs');
     }
@@ -1415,10 +2060,26 @@ export const browserSnapshotTool = {
   description: `Capture un instantané complet de la page avec accessibilité et structure sémantique. C'est l'outil le plus puissant pour obtenir le contenu de la page rapidement car il capture d'accessibilité complète, structure sémantique riche, texte extrait lisible, éléments interactifs identifiés, positions et tailles exactes, états visibles.`,
   parameters: z.object({
     pageId: z.string().optional().describe('ID de la page, par défaut le courant'),
-    includeText: z.boolean().optional().default(true).describe('Inclure le contenu textuel extrait'),
-    includeForms: z.boolean().optional().default(true).describe('Inclure les informations sur les formulaires'),
-    includeLinks: z.boolean().optional().default(true).describe('Inclure les informations sur les liens'),
-    maxElements: z.number().optional().default(1000).describe('Nombre maximum d\'éléments à retourner'),
+    includeText: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe('Inclure le contenu textuel extrait'),
+    includeForms: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Inclure les informations sur les formulaires'),
+    includeLinks: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe('Inclure les informations sur les liens'),
+    maxElements: z
+      .number()
+      .optional()
+      .default(50)
+      .describe("Nombre maximum d'éléments à retourner"),
   }),
   execute: async (args: any, _context: Context<AuthData>) => {
     const { pageId = currentPageId, includeText, includeForms, includeLinks, maxElements } = args;
@@ -1526,8 +2187,8 @@ export const browserSnapshotTool = {
 
             return Array.from(textSet).join('\n');
           });
-        } catch (error) {
-          textContent = 'Erreur lors de l\'extraction du texte';
+        } catch {
+          textContent = "Erreur lors de l'extraction du texte";
         }
       }
 
@@ -1544,7 +2205,7 @@ export const browserSnapshotTool = {
               const formData = {
                 action: (form as HTMLFormElement).action || '',
                 method: (form as HTMLFormElement).method || 'get',
-                inputs: Array.from(inputs).map(input => ({
+                inputs: Array.from(inputs).map((input) => ({
                   type: (input as HTMLInputElement).type || 'text',
                   name: (input as HTMLInputElement).name || '',
                   placeholder: (input as HTMLInputElement).placeholder || '',
@@ -1557,8 +2218,9 @@ export const browserSnapshotTool = {
 
             return formsData;
           });
-        } catch (error) {
+        } catch (formsError) {
           forms = [];
+          console.warn('Erreur extraction formulaires:', formsError);
         }
       }
 
@@ -1585,8 +2247,9 @@ export const browserSnapshotTool = {
 
             return linksData;
           });
-        } catch (error) {
+        } catch (linksError) {
           links = [];
+          console.warn('Erreur extraction liens:', linksError);
         }
       }
 
@@ -1625,7 +2288,7 @@ export const listExternalBrowserTabsTool = {
       .string()
       .optional()
       .describe(
-        'Nom du navigateur (chrome, brave, edge, firefox). Si non spécifié, liste tous les navigateurs.'
+        'Nom du navigateur (chrome, brave, edge, firefox, comet). Si non spécifié, liste tous les navigateurs.'
       ),
   }),
   execute: async (args: any, _context: Context<AuthData>) => {
