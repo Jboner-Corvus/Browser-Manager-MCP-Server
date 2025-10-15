@@ -1,0 +1,1 @@
+import{expect as t,test as e}from"vitest";import{newFeature as r}from"./newFeature.js";e("newFeature should return a string",()=>{t(typeof r()).toBe("string")});

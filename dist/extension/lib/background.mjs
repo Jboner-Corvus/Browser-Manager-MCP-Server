@@ -155,7 +155,7 @@ class TabShareExtension {
         return true;
       case "getTabs":
         this._getTabs().then(
-          (tabs) => sendResponse({ success: true, tabs, currentTabId: senderTabId }),
+          (tabs) => sendResponse({ success: true, data: tabs, currentTabId: senderTabId }),
           (error) => sendResponse({ success: false, error: error.message })
         );
         return true;
@@ -174,7 +174,11 @@ class TabShareExtension {
         return true;
       case "getConnectionStatus":
         sendResponse({
-          connectedTabId: this._connectedTabId
+          success: true,
+          data: {
+            isConnected: !!this._connectedTabId,
+            connectedTabId: this._connectedTabId
+          }
         });
         return false;
       case "disconnect":
@@ -394,10 +398,12 @@ class TabShareExtension {
       return hasUrl && isValidTab;
     });
     debugLog(`Filtered tabs count: ${filteredTabs.length}`);
+    debugLog(`Filtered tabs:`, filteredTabs.map((t) => ({ id: t.id, url: t.url, title: t.title })));
     if (filteredTabs.length === 0 && tabs.length > 0) {
       debugLog("No tabs with URLs found, returning all valid tabs as fallback");
       return tabs.filter((tab) => tab.id && tab.id > 0);
     }
+    debugLog(`Returning ${filteredTabs.length} filtered tabs to popup`);
     return filteredTabs;
   }
   async _onActionClicked() {

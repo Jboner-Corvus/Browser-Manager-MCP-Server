@@ -1,0 +1,1 @@
+import{pino as o}from"pino";import{config as t}from"./config.js";const e=o({level:t.LOG_LEVEL,transport:"development"===t.NODE_ENV?{target:"pino-pretty"}:void 0});export default e;

@@ -104,6 +104,37 @@ body {
   font-size: 12px;
 }
 
+/* Connected Info Section */
+.connected-info {
+  padding: 20px;
+}
+
+.disconnect-button {
+  width: 100%;
+  padding: 12px 20px;
+  background: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.disconnect-button:hover {
+  background: #5a6268;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+}
+
+.disconnect-button:active {
+  transform: translateY(0);
+}
+
 /* Connection Section */
 .connection-section {
   padding: 20px;
