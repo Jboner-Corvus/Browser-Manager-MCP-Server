@@ -23,6 +23,9 @@ export default defineConfig({
   plugins: [
     react()
   ],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production')
+  },
   root: resolve(__dirname, 'src/ui'),
   publicDir: false,
   build: {
