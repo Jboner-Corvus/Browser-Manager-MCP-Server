@@ -99,53 +99,48 @@ node server.js
 
 ## Utilisation
 
-### 🔧 Lancement des Navigateurs en Mode Debug
+### 🔌 Installation de l'Extension Browser Manager MCP Bridge
 
-Pour permettre au serveur MCP de détecter et contrôler les navigateurs existants avec leurs URL exactes, vous devez les lancer en mode debugging distant.
+Pour contrôler les navigateurs externes (déjà ouverts), vous devez installer l'extension Chrome incluse.
 
-#### Pourquoi le mode Debug est nécessaire ?
+#### Installation de l'extension :
 
-- **Sans debug** : Le MCP ne peut qu'estimer le nombre d'onglets (méthode alternative)
-- **Avec debug** : Le MCP peut accéder aux URL exactes, titres et contrôler complètement les onglets
+L'extension est déjà compilée et empaquetée. Pour l'installer :
 
-#### Commandes pour lancer les navigateurs en mode Debug (Windows) :
+1. **Téléchargez l'extension** :
+   - Utilisez le fichier `dist/browser-manager-extension.zip`
 
-**Google Chrome :**
-```cmd
-start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\temp\chrome-debug"
-```
+2. **Installez dans Chrome/Brave** :
+   - Ouvrez Chrome/Brave et allez à `chrome://extensions/`
+   - Activez le "Mode développeur" (en haut à droite)
+   - Glissez-déposez le fichier `.zip` dans la page des extensions
+   - L'extension devrait s'installer automatiquement
 
-**Brave Browser :**
-```cmd
-start "" "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --remote-debugging-port=9223 --user-data-dir="C:\temp\brave-debug"
-```
+3. **Vérifiez l'installation** :
+   - L'icône de l'extension devrait apparaître dans la barre d'outils
+   - Cliquez dessus pour ouvrir l'interface de connexion
 
-**Microsoft Edge :**
-```cmd
-start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9224 --user-data-dir="C:\temp\edge-debug"
-```
+#### Utilisation de l'extension :
 
-**Chromium :**
-```cmd
-start "" "C:\Program Files\Chromium\Application\chromium.exe" --remote-debugging-port=9225 --user-data-dir="C:\temp\chromium-debug"
-```
+- L'extension permet de connecter le serveur MCP aux navigateurs externes
+- Elle utilise un WebSocket relay sur le port 8082
+- Supporte Brave, Chrome, Edge et autres navigateurs Chromium
 
+#### Test de l'extension :
 
-#### Vérification du mode Debug :
+Pour vérifier que l'extension fonctionne correctement :
 
-Après avoir lancé un navigateur avec les commandes ci-dessus, ouvrez dans votre navigateur :
-```
-http://localhost:9222/json
-```
+1. **Démarrez le serveur MCP** avec `.\start-prod.ps1`
+2. **Ouvrez un navigateur** (Brave, Chrome, etc.) avec quelques onglets
+3. **Cliquez sur l'icône de l'extension** dans la barre d'outils
+4. **Sélectionnez un onglet** à contrôler depuis l'interface
+5. **Testez avec un client MCP** (Claude Desktop, etc.) en utilisant les outils comme `list_external_browser_tabs`
 
-Si vous voyez une page JSON avec des informations sur les onglets, le mode debug est bien activé !
-
-
-#### Notes importantes :
-
-- Les navigateurs lancés **par le serveur MCP** sont automatiquement en mode debug
-- Les navigateurs **existants** doivent être relancés avec les commandes ci-dessus pour être détectés complètement
-- L'option `--user-data-dir` crée un profil séparé pour éviter les conflits avec votre navigateur normal
+**Indicateurs de bon fonctionnement :**
+- ✅ L'icône de l'extension affiche un badge vert "✓" sur l'onglet connecté
+- ✅ Les outils MCP peuvent lister et contrôler les onglets externes
+- ✅ Aucune erreur dans la console développeur de l'extension
+- ✅ Le WebSocket relay (port 8082) est accessible
 
 ### Endpoints API
 

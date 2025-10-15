@@ -35,10 +35,14 @@ export default defineConfig({
         status: resolve(__dirname, 'src/ui/status.tsx')
       },
       formats: ['es'],
-      fileName: (format, entryName) => `lib/ui/${entryName}.js`
+      fileName: (format, entryName) => `${entryName}.js`
     },
     rollupOptions: {
-      external: ['react', 'react-dom', 'react/jsx-runtime']
+      // React inclus dans le bundle pour l'extension
+      output: {
+        manualChunks: undefined, // Tout dans un seul fichier pour éviter les imports relatifs
+        entryFileNames: '[name].js'
+      }
     }
   }
 });

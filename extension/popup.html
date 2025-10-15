@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Manager MCP Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>MCP Bridge</span>
+      </div>
+      <div class="version">v2.0</div>
+    </header>
+
+    <!-- Status Section -->
+    <div class="status-section">
+      <div id="status" class="status">Déconnecté</div>
+      <div class="status-details">
+        <small id="statusDetails">Prêt à se connecter</small>
+      </div>
+    </div>
+
+    <!-- Connection Section -->
+    <div class="connection-section">
+      <div class="input-group">
+        <label for="wsUrl">WebSocket URL</label>
+        <div class="input-wrapper">
+          <input
+            type="text"
+            id="wsUrl"
+            placeholder="ws://localhost:8084"
+            class="ws-input"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <button id="urlHelpBtn" class="help-button" title="Aide">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="2"/>
+              <path d="M9.09091 9H9.1M12 12V16M14.9091 15H14.9182" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button id="connectBtn" class="connect-button">
+        Se connecter
+      </button>
+    </div>
+
+    <!-- Tabs Section -->
+    <div id="tabsList" class="tabs-section" style="display: none;">
+      <!-- Tabs will be dynamically inserted here -->
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-links">
+        <a href="#" id="docsLink" class="footer-link">Documentation</a>
+        <a href="#" id="settingsLink" class="footer-link">Paramètres</a>
+        <a href="#" id="aboutLink" class="footer-link">À propos</a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Help Modal -->
+  <div id="helpModal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Connexion WebSocket</h3>
+        <button class="modal-close" id="closeHelpModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <h4>URL par défaut:</h4>
+        <code>ws://localhost:8084</code>
+
+        <h4>Si ça ne fonctionne pas:</h4>
+        <ul>
+          <li>Vérifiez que le serveur MCP est en cours d'exécution</li>
+          <li>Assurez-vous que le port 8084 n'est pas bloqué</li>
+          <li>Essayez ws://localhost:8082 si nécessaire</li>
+        </ul>
+
+        <h4>Erreurs courantes:</h4>
+        <ul>
+          <li><strong>Connection timeout</strong>: Le serveur ne répond pas</li>
+          <li><strong>WebSocket error</strong>: Vérifiez l'URL et le port</li>
+          <li><strong>No tab available</strong>: Ouvrez un onglet normal</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

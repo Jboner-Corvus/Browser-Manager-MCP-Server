@@ -25,6 +25,7 @@ export default [
       "extension/**",
       "extension/build/",
       "extension/dist/",
+      "test-snapshot.js",
     ]
   },
   eslintJs.configs.recommended,

@@ -16,7 +16,8 @@
   },
   "license": "Apache-2.0",
   "scripts": {
-    "build": "npm run type-check && npm run build:ui && npm run build:sw",
+    "build": "npm run type-check && npm run build:ui && npm run build:sw && npm run pack",
+    "pack": "node pack.js",
     "build:ui": "vite build",
     "build:sw": "vite build --config vite.sw.config.mts",
     "watch": "tsc --watch --project . & tsc --watch --project tsconfig.ui.json & vite build --watch & vite build --watch --config vite.sw.config.mts",
