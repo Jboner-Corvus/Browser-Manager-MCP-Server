@@ -1,4 +1,4 @@
-import { c as createRoot, j as jsxRuntimeExports, r as reactExports, B as Button, A as AuthTokenSection, T as TabItem, g as getOrCreateAuthToken } from "./authToken-BzalEJ_I.mjs";
+import { c as createRoot, j as jsxRuntimeExports, r as reactExports, B as Button, A as AuthTokenSection, T as TabItem, g as getOrCreateAuthToken } from "./authToken-DYNxhaxD.mjs";
 const SUPPORTED_PROTOCOL_VERSION = 1;
 const ConnectApp = () => {
   const [tabs, setTabs] = reactExports.useState([]);

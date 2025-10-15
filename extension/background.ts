@@ -3,11 +3,9 @@
  * Combines the reliability of Simple Bridge with professional features
  */
 
-// Professional logging
+// Professional logging - always enabled for debugging
 const debugLog = (...args: any[]) => {
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[Extension]', ...args);
-  }
+  console.log('[Extension]', ...args);
 };
 
 // Enhanced Relay Connection with professional features
@@ -143,23 +141,35 @@ class RelayConnection {
 
         // Get all tabs for comprehensive response
         const tabs = await chrome.tabs.query({});
-        const activeTab = tabs.find(tab => tab.active) || tabs[0];
+
+        // Ensure we have at least one tab
+        if (!tabs || tabs.length === 0) {
+          throw new Error('No tabs available');
+        }
+
+        const activeTab = tabs.find(tab => tab.active && tab.id) || tabs.find(tab => tab.id);
+
+        if (!activeTab || !activeTab.id) {
+          throw new Error('No valid tab found');
+        }
 
         return {
           targetInfo: {
-            id: activeTab?.id.toString() || 'unknown',
-            title: activeTab?.title || 'Unknown Tab',
-            url: activeTab?.url || 'about:blank',
+            id: activeTab.id.toString(),
+            title: activeTab.title || 'Unknown Tab',
+            url: activeTab.url || 'about:blank',
             type: 'page'
           },
-          allTabs: tabs.map(tab => ({
-            id: tab.id.toString(),
-            title: tab.title || 'Unknown Tab',
-            url: tab.url || 'about:blank',
-            type: 'page',
-            active: tab.active,
-            windowId: tab.windowId
-          }))
+          allTabs: tabs
+            .filter(tab => tab.id) // Filter out tabs without ID
+            .map(tab => ({
+              id: tab.id!.toString(),
+              title: tab.title || 'Unknown Tab',
+              url: tab.url || 'about:blank',
+              type: 'page',
+              active: tab.active,
+              windowId: tab.windowId
+            }))
         };
       } catch (error) {
         debugLog('Failed to attach debugger:', error);
@@ -405,12 +415,35 @@ class ProfessionalExtensionService {
 
   private async handleGetTabs(): Promise<chrome.tabs.Tab[]> {
     try {
-      const tabs = await chrome.tabs.query({});
-      return tabs.filter(tab =>
+      debugLog('Getting all tabs...');
+      const allTabs = await chrome.tabs.query({});
+      debugLog(`Total tabs found: ${allTabs.length}`);
+
+      // Log all tabs for debugging
+      allTabs.forEach((tab, index) => {
+        debugLog(`Tab ${index}: ID=${tab.id}, URL=${tab.url}, Title=${tab.title}, Active=${tab.active}`);
+      });
+
+      // First try to get tabs with URLs (excluding Chrome internal pages)
+      let validTabs = allTabs.filter(tab =>
+        tab.id && // Ensure tab has an ID
         tab.url &&
         !tab.url.startsWith('chrome://') &&
-        !tab.url.startsWith('chrome-extension://')
+        !tab.url.startsWith('chrome-extension://') &&
+        !tab.url.startsWith('moz-extension://') &&
+        !tab.url.startsWith('edge://')
       );
+
+      debugLog(`Valid tabs with URLs: ${validTabs.length}`);
+
+      // If no tabs with URLs, return all tabs with IDs (including new tabs)
+      if (validTabs.length === 0) {
+        debugLog('No tabs with URLs found, returning all tabs with IDs');
+        validTabs = allTabs.filter(tab => tab.id);
+        debugLog(`All tabs with IDs: ${validTabs.length}`);
+      }
+
+      return validTabs;
     } catch (error) {
       debugLog('Failed to get tabs:', error);
       throw error;

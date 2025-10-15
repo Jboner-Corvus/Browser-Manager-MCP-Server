@@ -2,6 +2,7 @@
 
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 import dotenv from 'dotenv';
 import { z } from 'zod';
@@ -18,9 +19,9 @@ if (process.env.NODE_ENV !== 'test') {
   const userEnvPath = path.resolve(process.cwd(), '.env');
 
   // Charger depuis le répertoire du projet si disponible, sinon depuis le répertoire utilisateur
-  if (require('fs').existsSync(projectEnvPath)) {
+  if (fs.existsSync(projectEnvPath)) {
     dotenv.config({ path: projectEnvPath });
-  } else if (require('fs').existsSync(userEnvPath)) {
+  } else if (fs.existsSync(userEnvPath)) {
     dotenv.config({ path: userEnvPath });
   } else {
     // Pas de fichier .env trouvé, utiliser les valeurs par défaut
