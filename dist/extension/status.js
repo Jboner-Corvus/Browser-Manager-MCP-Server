@@ -1,4 +1,4 @@
-import { c as createRoot, j as jsxRuntimeExports, r as reactExports, T as TabItem, B as Button, A as AuthTokenSection } from "./authToken-BzalEJ_I.mjs";
+import { c as createRoot, j as jsxRuntimeExports, r as reactExports, T as TabItem, B as Button, A as AuthTokenSection } from "./authToken-DYNxhaxD.mjs";
 const StatusApp = () => {
   const [status, setStatus] = reactExports.useState({
     isConnected: false,

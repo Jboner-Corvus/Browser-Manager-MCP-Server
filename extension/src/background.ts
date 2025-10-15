@@ -47,21 +47,37 @@ class TabShareExtension {
 
   // Promise-based message handling is not supported in Chrome: https://issues.chromium.org/issues/40753031
   private _onMessage(message: PageMessage, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) {
+    // Extract tab info safely at the beginning
+    const senderTabId = sender.tab?.id;
+    const senderWindowId = sender.tab?.windowId;
+
     switch (message.type) {
       case 'connectToMCPRelay':
-        this._connectToRelay(sender.tab!.id!, message.mcpRelayUrl).then(
+        // For popup connections, we don't need a sender tab ID
+        // The popup will specify which tab to connect to later
+        this._connectToRelayFromPopup(message.mcpRelayUrl).then(
             () => sendResponse({ success: true }),
             (error: any) => sendResponse({ success: false, error: error.message }));
         return true;
       case 'getTabs':
         this._getTabs().then(
-            tabs => sendResponse({ success: true, tabs, currentTabId: sender.tab?.id }),
+            tabs => sendResponse({ success: true, tabs, currentTabId: senderTabId }),
             (error: any) => sendResponse({ success: false, error: error.message }));
         return true;
       case 'connectToTab':
-        const tabId = message.tabId || sender.tab?.id!;
-        const windowId = message.windowId || sender.tab?.windowId!;
-        this._connectTab(sender.tab!.id!, tabId, windowId, message.mcpRelayUrl!).then(
+        // If message specifies tabId and windowId, use them
+        // Otherwise, try to use sender's tab info
+        const targetTabId = message.tabId;
+        const targetWindowId = message.windowId;
+
+        if (!targetTabId || !targetWindowId) {
+          sendResponse({ success: false, error: 'Tab ID and window ID are required' });
+          return false;
+        }
+
+        // Use a generic selector ID for popup connections
+        const selectorTabId = senderTabId || 0; // Use 0 as default for popup
+        this._connectTab(selectorTabId, targetTabId, targetWindowId, message.mcpRelayUrl).then(
             () => sendResponse({ success: true }),
             (error: any) => sendResponse({ success: false, error: error.message }));
         return true; // Return true to indicate that the response will be sent asynchronously
@@ -77,6 +93,60 @@ class TabShareExtension {
         return true;
     }
     return false;
+  }
+
+  private async _connectToRelayFromPopup(mcpRelayUrl: string): Promise<void> {
+    try {
+      debugLog(`Connecting to relay at ${mcpRelayUrl} from popup`);
+
+      // Tentative de connexion avec retry automatique
+      let socket: WebSocket;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      while (retryCount < maxRetries) {
+        try {
+          socket = new WebSocket(mcpRelayUrl);
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              socket.close();
+              reject(new Error(`Connection timeout (attempt ${retryCount + 1}/${maxRetries})`));
+            }, 3000);
+
+            socket.onopen = () => {
+              clearTimeout(timeout);
+              resolve();
+            };
+            socket.onerror = (error) => {
+              clearTimeout(timeout);
+              reject(new Error(`WebSocket error: ${error}`));
+            };
+          });
+          break; // Connexion réussie
+        } catch (error) {
+          retryCount++;
+          if (retryCount >= maxRetries) {
+            throw error;
+          }
+          debugLog(`Connection attempt ${retryCount} failed, retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        }
+      }
+
+      const connection = new RelayConnection(socket!);
+
+      // For popup connections, we don't set up tab-specific notifications
+      // The connection will be associated with a tab when connectToTab is called
+
+      // Store the connection temporarily until a tab is selected
+      this._pendingTabSelection.set(0, { connection }); // Use 0 as key for popup
+
+      debugLog(`Connected to MCP relay successfully from popup`);
+    } catch (error: any) {
+      const message = `Failed to connect to MCP relay: ${error.message}`;
+      debugLog(message);
+      throw new Error(message);
+    }
   }
 
   private async _connectToRelay(selectorTabId: number, mcpRelayUrl: string): Promise<void> {
@@ -251,8 +321,30 @@ class TabShareExtension {
 
   private async _getTabs(): Promise<chrome.tabs.Tab[]> {
     const tabs = await chrome.tabs.query({});
-    // Allow all tabs including chrome:// and internal URLs for debugging
-    return tabs.filter(tab => tab.url);
+    debugLog(`Total tabs found: ${tabs.length}`);
+
+    // Be more permissive - include tabs even if they don't have URLs
+    // This helps with new tabs, chrome:// pages, etc.
+    const filteredTabs = tabs.filter(tab => {
+      const hasUrl = !!tab.url;
+      const isValidTab = tab.id && tab.id > 0;
+      if (hasUrl && isValidTab) {
+        debugLog(`Tab ${tab.id}: ${tab.title} - ${tab.url}`);
+      } else {
+        debugLog(`Excluding tab ${tab.id}: URL=${tab.url}, Valid=${isValidTab}`);
+      }
+      return hasUrl && isValidTab;
+    });
+
+    debugLog(`Filtered tabs count: ${filteredTabs.length}`);
+
+    // If no tabs with URLs found, create a fallback response
+    if (filteredTabs.length === 0 && tabs.length > 0) {
+      debugLog('No tabs with URLs found, returning all valid tabs as fallback');
+      return tabs.filter(tab => tab.id && tab.id > 0);
+    }
+
+    return filteredTabs;
   }
 
   private async _onActionClicked(): Promise<void> {

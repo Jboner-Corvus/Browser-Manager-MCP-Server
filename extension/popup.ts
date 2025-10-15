@@ -102,8 +102,8 @@ async function connect(): Promise<void> {
       throw new Error(tabsResponse.error || 'Échec de récupération des onglets');
     }
 
-    const tabs = tabsResponse.data;
-    if (tabs.length === 0) {
+    const tabs = tabsResponse.data || [];
+    if (!Array.isArray(tabs) || tabs.length === 0) {
       throw new Error('Aucun onglet disponible');
     }
 
@@ -113,6 +113,7 @@ async function connect(): Promise<void> {
     const connectTabResponse = await sendMessage({
       type: 'connectToTab',
       tabId: activeTab.id,
+      windowId: activeTab.windowId,
       mcpRelayUrl: wsUrl
     });
 
@@ -179,7 +180,10 @@ async function checkConnectionStatus(): Promise<void> {
         // Load tabs if connected
         const tabsResponse = await sendMessage({ type: 'getTabs' });
         if (tabsResponse.success) {
-          displayTabs(tabsResponse.data, status.connectedTabId);
+          const tabs = tabsResponse.data || [];
+          if (Array.isArray(tabs)) {
+            displayTabs(tabs, status.connectedTabId);
+          }
         }
       } else {
         updateStatus('Déconnecté', 'disconnected');
@@ -218,6 +222,16 @@ function setButtonState(state: 'connecting' | 'connected' | 'disconnected' | 'di
 
 function displayTabs(tabs: chrome.tabs.Tab[], connectedTabId: number | null): void {
   if (!tabsList) return;
+
+  // Ensure tabs is a valid array
+  if (!Array.isArray(tabs) || tabs.length === 0) {
+    tabsList.innerHTML = `
+      <div class="tabs-header">
+        <h4>Aucun onglet disponible</h4>
+      </div>
+    `;
+    return;
+  }
 
   tabsList.style.display = 'block';
   tabsList.innerHTML = `

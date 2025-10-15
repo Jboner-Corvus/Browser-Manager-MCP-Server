@@ -3,7 +3,7 @@ var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { en
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 function debugLog(...args) {
   {
-    console.log("[Extension]", ...args);
+    console.log("[Extension]", (/* @__PURE__ */ new Date()).toISOString(), ...args);
   }
 }
 class RelayConnection {
@@ -144,26 +144,30 @@ class TabShareExtension {
   // Promise-based message handling is not supported in Chrome: https://issues.chromium.org/issues/40753031
   _onMessage(message, sender, sendResponse) {
     var _a, _b;
+    const senderTabId = (_a = sender.tab) == null ? void 0 : _a.id;
+    (_b = sender.tab) == null ? void 0 : _b.windowId;
     switch (message.type) {
       case "connectToMCPRelay":
-        this._connectToRelay(sender.tab.id, message.mcpRelayUrl).then(
+        this._connectToRelayFromPopup(message.mcpRelayUrl).then(
           () => sendResponse({ success: true }),
           (error) => sendResponse({ success: false, error: error.message })
         );
         return true;
       case "getTabs":
         this._getTabs().then(
-          (tabs) => {
-            var _a2;
-            return sendResponse({ success: true, tabs, currentTabId: (_a2 = sender.tab) == null ? void 0 : _a2.id });
-          },
+          (tabs) => sendResponse({ success: true, tabs, currentTabId: senderTabId }),
           (error) => sendResponse({ success: false, error: error.message })
         );
         return true;
       case "connectToTab":
-        const tabId = message.tabId || ((_a = sender.tab) == null ? void 0 : _a.id);
-        const windowId = message.windowId || ((_b = sender.tab) == null ? void 0 : _b.windowId);
-        this._connectTab(sender.tab.id, tabId, windowId, message.mcpRelayUrl).then(
+        const targetTabId = message.tabId;
+        const targetWindowId = message.windowId;
+        if (!targetTabId || !targetWindowId) {
+          sendResponse({ success: false, error: "Tab ID and window ID are required" });
+          return false;
+        }
+        const selectorTabId = senderTabId || 0;
+        this._connectTab(selectorTabId, targetTabId, targetWindowId, message.mcpRelayUrl).then(
           () => sendResponse({ success: true }),
           (error) => sendResponse({ success: false, error: error.message })
         );
@@ -182,25 +186,109 @@ class TabShareExtension {
     }
     return false;
   }
+  async _connectToRelayFromPopup(mcpRelayUrl) {
+    try {
+      debugLog(`Connecting to relay at ${mcpRelayUrl} from popup`);
+      let socket;
+      let retryCount = 0;
+      const maxRetries = 3;
+      while (retryCount < maxRetries) {
+        try {
+          socket = new WebSocket(mcpRelayUrl);
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              socket.close();
+              reject(new Error(`Connection timeout (attempt ${retryCount + 1}/${maxRetries})`));
+            }, 3e3);
+            socket.onopen = () => {
+              clearTimeout(timeout);
+              resolve();
+            };
+            socket.onerror = (error) => {
+              clearTimeout(timeout);
+              reject(new Error(`WebSocket error: ${error}`));
+            };
+          });
+          break;
+        } catch (error) {
+          retryCount++;
+          if (retryCount >= maxRetries) {
+            throw error;
+          }
+          debugLog(`Connection attempt ${retryCount} failed, retrying...`);
+          await new Promise((resolve) => setTimeout(resolve, 1e3 * retryCount));
+        }
+      }
+      const connection = new RelayConnection(socket);
+      this._pendingTabSelection.set(0, { connection });
+      debugLog(`Connected to MCP relay successfully from popup`);
+    } catch (error) {
+      const message = `Failed to connect to MCP relay: ${error.message}`;
+      debugLog(message);
+      throw new Error(message);
+    }
+  }
   async _connectToRelay(selectorTabId, mcpRelayUrl) {
     try {
       debugLog(`Connecting to relay at ${mcpRelayUrl}`);
-      const socket = new WebSocket(mcpRelayUrl);
-      await new Promise((resolve, reject) => {
-        socket.onopen = () => resolve();
-        socket.onerror = () => reject(new Error("WebSocket error"));
-        setTimeout(() => reject(new Error("Connection timeout")), 5e3);
-      });
+      let socket;
+      let retryCount = 0;
+      const maxRetries = 3;
+      while (retryCount < maxRetries) {
+        try {
+          socket = new WebSocket(mcpRelayUrl);
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              socket.close();
+              reject(new Error(`Connection timeout (attempt ${retryCount + 1}/${maxRetries})`));
+            }, 3e3);
+            socket.onopen = () => {
+              clearTimeout(timeout);
+              resolve();
+            };
+            socket.onerror = (error) => {
+              clearTimeout(timeout);
+              reject(new Error(`WebSocket error: ${error}`));
+            };
+          });
+          break;
+        } catch (error) {
+          retryCount++;
+          if (retryCount >= maxRetries) {
+            throw error;
+          }
+          debugLog(`Connection attempt ${retryCount} failed, retrying...`);
+          await new Promise((resolve) => setTimeout(resolve, 1e3 * retryCount));
+        }
+      }
       const connection = new RelayConnection(socket);
       connection.onclose = () => {
         debugLog("Connection closed");
         this._pendingTabSelection.delete(selectorTabId);
+        chrome.tabs.sendMessage(selectorTabId, {
+          type: "connectionStatus",
+          status: "disconnected",
+          message: "Connexion au serveur MCP perdue"
+        }).catch(() => {
+        });
       };
       this._pendingTabSelection.set(selectorTabId, { connection });
-      debugLog(`Connected to MCP relay`);
+      chrome.tabs.sendMessage(selectorTabId, {
+        type: "connectionStatus",
+        status: "connected",
+        message: "Connecté au serveur MCP avec succès"
+      }).catch(() => {
+      });
+      debugLog(`Connected to MCP relay successfully`);
     } catch (error) {
       const message = `Failed to connect to MCP relay: ${error.message}`;
       debugLog(message);
+      chrome.tabs.sendMessage(selectorTabId, {
+        type: "connectionStatus",
+        status: "error",
+        message
+      }).catch(() => {
+      });
       throw new Error(message);
     }
   }
@@ -294,7 +382,23 @@ class TabShareExtension {
   }
   async _getTabs() {
     const tabs = await chrome.tabs.query({});
-    return tabs.filter((tab) => tab.url && !["chrome:", "edge:", "devtools:"].some((scheme) => tab.url.startsWith(scheme)));
+    debugLog(`Total tabs found: ${tabs.length}`);
+    const filteredTabs = tabs.filter((tab) => {
+      const hasUrl = !!tab.url;
+      const isValidTab = tab.id && tab.id > 0;
+      if (hasUrl && isValidTab) {
+        debugLog(`Tab ${tab.id}: ${tab.title} - ${tab.url}`);
+      } else {
+        debugLog(`Excluding tab ${tab.id}: URL=${tab.url}, Valid=${isValidTab}`);
+      }
+      return hasUrl && isValidTab;
+    });
+    debugLog(`Filtered tabs count: ${filteredTabs.length}`);
+    if (filteredTabs.length === 0 && tabs.length > 0) {
+      debugLog("No tabs with URLs found, returning all valid tabs as fallback");
+      return tabs.filter((tab) => tab.id && tab.id > 0);
+    }
+    return filteredTabs;
   }
   async _onActionClicked() {
     await chrome.tabs.create({

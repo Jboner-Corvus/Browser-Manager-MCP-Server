@@ -35,7 +35,8 @@ export default defineConfig({
     lib: {
       entry: {
         connect: resolve(__dirname, 'src/ui/connect.tsx'),
-        status: resolve(__dirname, 'src/ui/status.tsx')
+        status: resolve(__dirname, 'src/ui/status.tsx'),
+        popup: resolve(__dirname, 'popup.ts')
       },
       formats: ['es'],
       fileName: (format, entryName) => `${entryName}.js`
